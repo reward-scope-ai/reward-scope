@@ -74,9 +74,11 @@ def run_experiment(policy_name, policy, num_episodes=10):
     # Create environment
     env = gym.make("CartPole-v1")
 
-    # Create components
+    # Create components with timestamp to avoid database conflicts
+    import time as time_module
+    run_id = f"cartpole_{policy_name.lower().replace(' ', '_')}_{int(time_module.time())}"
     collector = DataCollector(
-        run_name=f"cartpole_{policy_name.lower().replace(' ', '_')}",
+        run_name=run_id,
         storage_dir="./reward_scope_data",
     )
 
@@ -88,10 +90,40 @@ def run_experiment(policy_name, policy, num_episodes=10):
     )
 
     # Create detector suite with bounds
-    detector_suite = HackingDetectorSuite(
-        observation_bounds=(env.observation_space.low, env.observation_space.high),
-        action_bounds=(np.array([0]), np.array([1])),  # Discrete actions 0, 1
+    # NOTE: Using shorter window sizes for CartPole's short episodes
+    from reward_scope.core.detectors import (
+        ActionRepetitionDetector,
+        StateCyclingDetector,
+        ComponentImbalanceDetector,
+        RewardSpikingDetector,
+        BoundaryExploitationDetector,
     )
+
+    detector_suite = HackingDetectorSuite(
+        enable_state_cycling=False,  # Disable for now (needs tuning)
+        enable_action_repetition=False,  # Will add manually with custom settings
+        enable_component_imbalance=True,
+        enable_reward_spiking=True,
+        enable_boundary_exploitation=True,
+        observation_bounds=(env.observation_space.low, env.observation_space.high),
+        action_bounds=(np.array([0]), np.array([1])),
+    )
+
+    # Add custom action repetition detector with smaller window for short episodes
+    action_detector = ActionRepetitionDetector(
+        window_size=20,  # Smaller window for CartPole (default: 50)
+        repetition_threshold=0.85,  # 85% same action
+    )
+    detector_suite.detectors.append(action_detector)
+
+    # Add custom state cycling detector
+    state_detector = StateCyclingDetector(
+        window_size=30,  # Smaller window (default: 100)
+        cycle_threshold=0.7,
+        min_cycle_length=2,
+        max_cycle_length=10,
+    )
+    detector_suite.detectors.append(state_detector)
 
     # Run episodes
     total_steps = 0
@@ -164,8 +196,9 @@ def run_experiment(policy_name, policy, num_episodes=10):
             print(f"  ⚠️  EPISODE ALERT: {alert.type.value}")
             print(f"      {alert.description}")
 
-        # Reset detectors
-        detector_suite.reset()
+        # NOTE: For CartPole, DON'T reset detectors between episodes
+        # This allows cross-episode pattern detection (important for short episodes)
+        # detector_suite.reset()
 
         if episode % 2 == 0:
             print(f"  Episode {episode + 1}: Reward={episode_reward:.0f}, Length={episode_length}")
@@ -217,20 +250,21 @@ def main():
     # Test 1: Action Repetition
     print("\n\n🔍 TEST 1: Action Repetition Policy")
     print("   (Always selects action=1)")
+    print("   NOTE: Needs ~20+ steps to detect, may not trigger on very short episodes")
     policy1 = ActionRepetitionPolicy(env, action=1)
-    run_experiment("Action Repetition", policy1, num_episodes=5)
+    run_experiment("Action Repetition", policy1, num_episodes=10)
 
     # Test 2: State Cycling
     print("\n\n🔍 TEST 2: State Cycling Policy")
     print("   (Alternates between actions 0 and 1)")
     policy2 = StateCyclingPolicy(env)
-    run_experiment("State Cycling", policy2, num_episodes=5)
+    run_experiment("State Cycling", policy2, num_episodes=10)
 
     # Test 3: Random (baseline)
     print("\n\n🔍 TEST 3: Random Policy (Baseline)")
     print("   (Random actions - should have low hacking score)")
     policy3 = RandomPolicy(env)
-    run_experiment("Random Baseline", policy3, num_episodes=5)
+    run_experiment("Random Baseline", policy3, num_episodes=10)
 
     env.close()
 
