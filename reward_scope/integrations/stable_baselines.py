@@ -249,7 +249,7 @@ class RewardScopeCallback(BaseCallback):
             # Print alerts if any
             if alerts and self.verbose >= 1:
                 for alert in alerts:
-                    print(f"[RewardScope] 🚨 {alert.type.value}: {alert.description}")
+                    print(f"[RewardScope] ALERT: {alert.type.value}: {alert.description}")
                     if self.verbose >= 2:
                         print(f"  Evidence: {alert.evidence}")
                         print(f"  Fix: {alert.suggested_fix}")

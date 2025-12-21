@@ -6,7 +6,7 @@ Demonstrates:
 - Custom component functions
 - Hacking detection on a more complex environment
 
-LunarLander-v2 has multiple reward components:
+LunarLander-v3 has multiple reward components:
 - Distance/velocity shaping
 - Leg contact bonus
 - Crash penalty
@@ -21,13 +21,22 @@ from reward_scope.integrations import RewardScopeWrapper
 
 def main():
     print("\n" + "="*60)
-    print("🔬 RewardScope - LunarLander Component Tracking")
+    print("RewardScope - LunarLander Component Tracking")
     print("="*60)
     print("\nThis example demonstrates multi-component reward tracking.")
-    print("We'll track different reward sources in LunarLander-v2.\n")
+    print("We'll track different reward sources in LunarLander-v3.\n")
 
-    # Create environment
-    env = gym.make("LunarLander-v2")
+    # Try to create environment
+    try:
+        env = gym.make("LunarLander-v3")
+    except Exception as e:
+        print(f"Error: Could not create LunarLander environment.")
+        print(f"   {e}")
+        print("\nTo run this example, install Box2D:")
+        print("   pip install 'gymnasium[box2d]'")
+        print("\nOr try the cartpole_basic.py example instead:")
+        print("   python examples/cartpole_basic.py")
+        return
     
     # Define component extraction functions
     # LunarLander provides some reward info in the info dict

@@ -271,14 +271,24 @@ class RewardScopeWrapper(gym.Wrapper):
         # Print alerts if any
         if alerts and self.verbose >= 1:
             for alert in alerts:
-                print(f"[RewardScope] 🚨 {alert.type.value}: {alert.description}")
+                print(f"[RewardScope] ALERT: {alert.type.value}: {alert.description}")
                 if self.verbose >= 2:
                     print(f"  Evidence: {alert.evidence}")
                     print(f"  Fix: {alert.suggested_fix}")
 
         # Inject RewardScope data into info dict
         info['reward_components'] = reward_components
-        info['hacking_alerts'] = alerts
+        # Convert alerts to serializable dicts
+        info['hacking_alerts'] = [
+            {
+                "type": a.type.value,
+                "severity": a.severity,
+                "description": a.description,
+                "step": a.step,
+                "episode": a.episode,
+            }
+            for a in alerts
+        ]
         info['hacking_score'] = self.detector_suite.get_hacking_score()
 
         # Increment counters
