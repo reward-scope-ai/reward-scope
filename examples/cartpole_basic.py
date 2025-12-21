@@ -1,159 +1,76 @@
 """
-Basic example: CartPole with reward tracking.
+CartPole Basic Example
 
-This is a simple example to verify Phase 1 implementation works.
-Uses only the core components (collector and decomposer) without
-requiring Stable-Baselines3.
+The simplest RewardScope example. Demonstrates:
+- Using the Gymnasium wrapper
+- Automatic data collection
+- Viewing results in the dashboard
+
+This example trains a random agent on CartPole-v1 and collects debugging data.
+Run this to verify RewardScope is installed correctly.
 """
 
-import sys
-import time
-from pathlib import Path
-
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 import gymnasium as gym
-import numpy as np
-
-from reward_scope.core.collector import DataCollector, StepData
-from reward_scope.core.decomposer import RewardDecomposer
-
-
-def random_policy(observation, action_space):
-    """Simple random policy for testing."""
-    return action_space.sample()
+from reward_scope.integrations import RewardScopeWrapper
 
 
 def main():
-    print("=" * 60)
-    print("CartPole Basic Example - Phase 1 Test")
-    print("=" * 60)
+    print("\n" + "="*60)
+    print("🔬 RewardScope - CartPole Basic Example")
+    print("="*60)
+    print("\nThis example demonstrates the simplest RewardScope usage.")
+    print("A random agent plays CartPole while we collect data.\n")
 
-    # Create environment
+    # Create environment and wrap it with RewardScope
     env = gym.make("CartPole-v1")
-
-    # Create data collector
-    collector = DataCollector(
-        run_name="cartpole_basic_test",
-        storage_dir="./reward_scope_data",
-        buffer_size=100,
+    env = RewardScopeWrapper(
+        env,
+        run_name="cartpole_basic",
+        verbose=1,
     )
 
-    # Create reward decomposer
-    # CartPole has a simple +1 reward per step
-    decomposer = RewardDecomposer(track_residual=True)
-    decomposer.register_component(
-        "survival",
-        lambda obs, act, info: 1.0,  # CartPole always gives +1 reward
-        description="Survival reward (constant +1)",
-    )
-
-    # Run multiple episodes
+    # Run episodes with random policy
     num_episodes = 5
-    total_steps = 0
-
+    
     for episode in range(num_episodes):
-        observation, info = env.reset()
-        episode_reward = 0
-        episode_length = 0
+        obs, info = env.reset()
         done = False
-
-        print(f"\nEpisode {episode + 1}/{num_episodes}")
-
+        episode_reward = 0
+        
         while not done:
-            # Select action (random policy)
-            action = random_policy(observation, env.action_space)
-
-            # Take step in environment
-            next_observation, reward, terminated, truncated, info = env.step(action)
+            action = env.action_space.sample()  # Random policy
+            obs, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
-
-            # Decompose reward
-            components = decomposer.decompose(observation, action, reward, info)
-
-            # Create step data
-            step_data = StepData(
-                step=total_steps,
-                episode=episode,
-                timestamp=time.time(),
-                observation=observation.tolist(),
-                action=int(action),
-                reward=float(reward),
-                done=terminated,
-                truncated=truncated,
-                info=info,
-                reward_components=components,
-            )
-
-            # Log step
-            collector.log_step(step_data)
-
-            # Update tracking
-            observation = next_observation
             episode_reward += reward
-            episode_length += 1
-            total_steps += 1
-
-        # End episode
-        episode_data = collector.end_episode()
-
-        # Print episode summary
-        print(f"  Reward: {episode_reward:.1f}")
-        print(f"  Length: {episode_length}")
-        print(f"  Component totals: {episode_data.component_totals}")
-
-    # Close environment and collector
+        
+        print(f"Episode {episode + 1}: Reward = {episode_reward:.0f}")
+    
+    # Get summary statistics
+    alerts = env.get_alerts()
+    hacking_score = env.get_hacking_score()
+    
     env.close()
-    collector.close()
-
-    print("\n" + "=" * 60)
-    print("Testing Data Retrieval")
-    print("=" * 60)
-
-    # Reopen collector to test data retrieval
-    collector = DataCollector(
-        run_name="cartpole_basic_test",
-        storage_dir="./reward_scope_data",
-    )
-
-    # Test get_episode_history
-    print("\nEpisode History:")
-    episodes = collector.get_episode_history(n=num_episodes)
-    for ep in episodes:
-        print(f"  Episode {ep.episode}: Reward={ep.total_reward:.1f}, Length={ep.length}")
-
-    # Test get_recent_steps
-    print("\nRecent Steps (last 10):")
-    recent_steps = collector.get_recent_steps(n=10)
-    for step in recent_steps[-5:]:  # Show last 5
-        print(f"  Step {step.step}: Episode={step.episode}, Reward={step.reward}")
-
-    # Test component statistics
-    print("\nComponent Statistics:")
-    stats = decomposer.get_component_stats()
-    for comp_name, comp_stats in stats.items():
-        print(f"  {comp_name}:")
-        print(f"    Mean: {comp_stats['mean']:.4f}")
-        print(f"    Std:  {comp_stats['std']:.4f}")
-        print(f"    Count: {comp_stats['count']}")
-
-    # Test dominance check
-    print("\nDominance Check (threshold=0.8):")
-    dominant = decomposer.check_dominance(threshold=0.8)
-    if dominant:
-        print(f"  Dominant components: {dominant}")
-    else:
-        print("  No dominant components detected")
-
-    collector.close()
-
-    print("\n" + "=" * 60)
-    print("Phase 1 Test Complete!")
-    print("=" * 60)
-    print(f"\nTotal steps collected: {total_steps}")
-    print(f"Total episodes: {num_episodes}")
-    print(f"Database saved to: ./reward_scope_data/cartpole_basic_test.db")
+    
+    # Print summary
+    print("\n" + "="*60)
+    print("Summary")
+    print("="*60)
+    print(f"Episodes completed: {num_episodes}")
+    print(f"Hacking score: {hacking_score:.2f}")
+    print(f"Alerts detected: {len(alerts)}")
+    
+    if alerts:
+        print("\nAlert breakdown:")
+        alert_counts = {}
+        for alert in alerts:
+            alert_type = alert.type.value
+            alert_counts[alert_type] = alert_counts.get(alert_type, 0) + 1
+        for alert_type, count in alert_counts.items():
+            print(f"  - {alert_type}: {count}")
+    
+    print(f"\nData saved to: ./reward_scope_data/cartpole_basic.db")
+    print("\nTo view the dashboard:")
+    print("  reward-scope dashboard --run-name cartpole_basic --data-dir ./reward_scope_data")
 
 
 if __name__ == "__main__":

@@ -19,27 +19,52 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
+MANIFEST
 
 # Virtual environments
 venv/
 ENV/
 env/
+.venv
 
-# IDE
+# IDEs
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
+.DS_Store
+
+# Testing
+.pytest_cache/
+.coverage
+.tox/
+htmlcov/
+*.cover
+.hypothesis/
 
 # RewardScope data
 reward_scope_data/
+*.db
+*.db-journal
 
-# OS
-.DS_Store
-Thumbs.db
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Reports
+*.html
+!docs/**/*.html
+!reward_scope/dashboard/templates/**/*.html
+
+# Logs
+*.log
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Test files
+test_*.py
+!tests/test_*.py

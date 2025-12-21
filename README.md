@@ -1,355 +1,236 @@
 # RewardScope 🔬
 
-**See what your RL agent actually learned**
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Real-time reward debugging and hacking detection for reinforcement learning.
+**Real-time reward debugging and hacking detection for reinforcement learning.**
 
-[![Tests](https://img.shields.io/badge/tests-78%20passed-brightgreen)]()
-[![Python](https://img.shields.io/badge/python-3.8+-blue)]()
-[![License](https://img.shields.io/badge/license-MIT-blue)]()
+RewardScope helps RL practitioners debug reward functions by tracking reward components, detecting common exploitation patterns, and visualizing training dynamics through a live web dashboard.
 
----
+![Dashboard Preview](docs/dashboard-preview.png)
+*Dashboard showing reward timeline, component breakdown, and hacking alerts*
 
-## 🚀 Quick Start
+## Why RewardScope?
+
+Reward functions are notoriously difficult to get right. Even well-intentioned designs can lead to [reward hacking](https://docs.google.com/spreadsheets/d/e/2PACX-1vRPiprOaC3HsCf5Tuum8bRfzYUiKLRqJmbOoC-32JorNdfyTiRRsR7Ea5eWtvsWzuxo8bjOxCG84dAg/pubhtml)—when agents find unintended ways to maximize reward that don't align with your objectives.
+
+Research from [Anthropic](https://www.anthropic.com/) and others shows that reward misspecification can lead to emergent misalignment, especially as models become more capable. RewardScope provides real-time visibility into what your agent is actually learning.
+
+## Features
+
+- 🎯 **Reward Decomposition** - Track individual reward components separately
+- 🚨 **Hacking Detection** - 5 detectors for common exploitation patterns
+- 📊 **Live Dashboard** - Real-time visualization with FastAPI + Chart.js
+- 🔌 **Easy Integration** - Works with Gymnasium, Stable-Baselines3, and Isaac Lab
+- 💾 **Persistent Storage** - SQLite backend for post-training analysis
+- 🎮 **CLI Tools** - Dashboard, reports, and run management
+
+## Quick Start
 
 ### Installation
 
-#### Option 1: Install in editable mode (recommended for development)
-
 ```bash
-# Clone the repository
-git clone https://github.com/jimmybentley/reward-forensics.git
-cd reward-forensics
-
-# Create a virtual environment (recommended)
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install in editable mode
-pip install -e .
-
-# For development (includes pytest, black, ruff)
-pip install -e ".[dev]"
-
-# For Stable-Baselines3 integration
-pip install -e ".[sb3]"
-
-# Install everything
-pip install -e ".[all]"
+pip install reward-scope
 ```
 
-#### Option 2: Install from requirements.txt
+### Basic Usage
 
-```bash
-# Core dependencies only
-pip install -r requirements.txt
-
-# Development dependencies
-pip install -r requirements-dev.txt
-```
-
-#### Option 3: Quick test without installation
-
-```bash
-# Install minimal dependencies
-pip install numpy gymnasium pytest
-
-# Run from repo root
-export PYTHONPATH="${PYTHONPATH}:$(pwd)"
-python3 examples/cartpole_basic.py
-```
-
----
-
-## 📖 Usage
-
-### Basic Example (Phase 1 - Core Tracking)
+Wrap your Gymnasium environment:
 
 ```python
 import gymnasium as gym
-from reward_scope.core import DataCollector, RewardDecomposer, StepData
+from reward_scope.integrations import RewardScopeWrapper
 
-# Create environment
 env = gym.make("CartPole-v1")
+env = RewardScopeWrapper(env, run_name="my_experiment")
 
-# Set up data collection
-collector = DataCollector(run_name="my_experiment")
-
-# Set up reward decomposition
-decomposer = RewardDecomposer()
-decomposer.register_component(
-    "survival",
-    lambda obs, act, info: 1.0,
-    description="Survival reward"
-)
-
-# Training loop
+# Train as usual
 obs, info = env.reset()
-for step in range(1000):
+for _ in range(1000):
     action = env.action_space.sample()
-    next_obs, reward, terminated, truncated, info = env.step(action)
-
-    # Decompose reward
-    components = decomposer.decompose(obs, action, reward, info)
-
-    # Log step
-    step_data = StepData(
-        step=step, episode=0, timestamp=time.time(),
-        observation=obs, action=action, reward=reward,
-        done=terminated, truncated=truncated, info=info,
-        reward_components=components
-    )
-    collector.log_step(step_data)
-
+    obs, reward, terminated, truncated, info = env.step(action)
     if terminated or truncated:
-        collector.end_episode()
         obs, info = env.reset()
-    else:
-        obs = next_obs
 
-collector.close()
+env.close()
 ```
 
-### Hacking Detection Example (Phase 2)
+View the dashboard:
+
+```bash
+reward-scope dashboard --run-name my_experiment
+```
+
+Open http://localhost:8050 in your browser.
+
+### With Stable-Baselines3
 
 ```python
-from reward_scope.core import HackingDetectorSuite
+from stable_baselines3 import PPO
+from reward_scope.integrations import RewardScopeCallback
 
-# Create detector suite
-detector_suite = HackingDetectorSuite(
-    observation_bounds=(env.observation_space.low, env.observation_space.high),
-    action_bounds=(env.action_space.low, env.action_space.high),
+callback = RewardScopeCallback(
+    run_name="ppo_experiment",
+    start_dashboard=True,  # Auto-start dashboard!
 )
 
-# During training
-alerts = detector_suite.update(
-    step=step, episode=episode,
-    observation=obs, action=action, reward=reward,
-    reward_components=components, done=done, info=info
+model = PPO("MlpPolicy", env)
+model.learn(total_timesteps=50000, callback=callback)
+```
+
+The dashboard starts automatically at http://localhost:8050.
+
+## What RewardScope Detects
+
+### 1. Action Repetition
+Agent takes the same action repeatedly (e.g., always accelerating)
+
+### 2. State Cycling
+Agent finds degenerate loop of states (e.g., spinning in circles)
+
+### 3. Component Imbalance
+One reward component dominates others (>80%)
+
+### 4. Reward Spiking
+Unnatural reward patterns or glitch states
+
+### 5. Boundary Exploitation
+Agent exploits state/action space boundaries
+
+Each detector provides:
+- **Severity score** (0-1)
+- **Evidence** (detailed metrics)
+- **Suggested fix** (how to address the issue)
+
+## Reward Component Tracking
+
+Track individual reward terms:
+
+```python
+component_fns = {
+    "distance": lambda obs, act, info: info.get("distance_reward"),
+    "energy": lambda obs, act, info: -0.01 * (act ** 2).sum(),
+    "stability": lambda obs, act, info: -1.0 if info.get("fallen") else 0.0,
+}
+
+env = RewardScopeWrapper(
+    env,
+    run_name="my_experiment",
+    component_fns=component_fns,
 )
-
-# Check for alerts
-for alert in alerts:
-    print(f"⚠️  {alert.type.value}: {alert.description}")
-    print(f"   Suggested fix: {alert.suggested_fix}")
-
-# Get overall hacking score
-score = detector_suite.get_hacking_score()
-if score > 0.5:
-    print(f"⚠️  High hacking likelihood: {score:.2f}")
 ```
 
----
+Or auto-extract from `info` dict:
 
-## 🧪 Running Examples
+```python
+env = RewardScopeWrapper(
+    env,
+    auto_extract_prefix="reward_",  # Extracts reward_forward, reward_ctrl, etc.
+)
+```
 
-### Basic CartPole Example
+## Documentation
+
+- [Quick Start Guide](docs/quickstart.md) - Get running in 5 minutes
+- [Reward Components](docs/reward_components.md) - How to track components
+- [Hacking Detection](docs/hacking_detection.md) - Understanding the detectors
+- [API Reference](docs/api_reference.md) - Full API documentation
+
+## Examples
+
+Check out the [examples/](examples/) directory:
+
+- `cartpole_basic.py` - Simplest example to verify installation
+- `lunarlander_components.py` - Multi-component reward tracking
+- `mujoco_ant.py` - Complex reward with Stable-Baselines3
+
+## CLI Commands
 
 ```bash
-python3 examples/cartpole_basic.py
+# Start dashboard
+reward-scope dashboard --run-name my_experiment
+
+# List all runs
+reward-scope list-runs ./reward_scope_data
+
+# Generate static report
+reward-scope report ./reward_scope_data --output report.html
 ```
 
-Output:
-```
-Episode 1/5
-  Reward: 13.0
-  Length: 13
-  Component totals: {'survival': 13.0}
-...
-Component Statistics:
-  survival:
-    Mean: 1.0000
-    Std:  0.0000
-    Count: 75
-```
+## Dashboard Features
 
-### Hacking Detection Demo
+The live dashboard shows:
+- **Reward Timeline** - Line chart of reward per step
+- **Component Breakdown** - Pie chart of component contributions
+- **Episode History** - Bar chart of episode rewards
+- **Live Stats** - Current step, episode, hacking score
+- **Alerts Panel** - Real-time hacking detection alerts
+
+All charts update in real-time via WebSocket (10Hz).
+
+## Requirements
+
+- Python 3.8+
+- gymnasium
+- numpy
+- fastapi (for dashboard)
+- uvicorn (for dashboard)
+
+Optional:
+- stable-baselines3 (for SB3 integration)
+- mujoco (for MuJoCo environments)
+
+## Development
 
 ```bash
-python3 examples/cartpole_hacking_demo.py
-```
-
-Output:
-```
-🔍 TEST 1: Action Repetition Policy
-  ⚠️  ALERT at step 52: action_repetition
-      Action repetition detected: 90.0% of actions are identical
-  Hacking Score: 0.85 / 1.00
-  ⚠️  HIGH HACKING LIKELIHOOD DETECTED!
-```
-
----
-
-## 🧪 Running Tests
-
-```bash
-# Run all tests
-pytest tests/ -v
-
-# Run specific test files
-pytest tests/test_collector.py -v
-pytest tests/test_decomposer.py -v
-pytest tests/test_detectors.py -v
-
-# Run with coverage
-pytest tests/ --cov=reward_scope --cov-report=html
-
-# Run specific test
-pytest tests/test_detectors.py::TestActionRepetitionDetector::test_detects_repeated_actions -v
-```
-
-**Expected output:**
-```
-============================== test session starts ==============================
-...
-78 passed in 1.09s
-==============================
-```
-
----
-
-## 🏗️ Project Structure
-
-```
-reward-forensics/
-├── reward_scope/
-│   ├── __init__.py
-│   └── core/
-│       ├── __init__.py
-│       ├── collector.py        # Data collection & SQLite storage
-│       ├── decomposer.py       # Reward component decomposition
-│       └── detectors.py        # Hacking detection algorithms
-│
-├── tests/
-│   ├── test_collector.py       # 21 tests
-│   ├── test_decomposer.py      # 28 tests
-│   └── test_detectors.py       # 29 tests
-│
-├── examples/
-│   ├── cartpole_basic.py       # Phase 1 demo
-│   └── cartpole_hacking_demo.py # Phase 2 demo
-│
-├── setup.py                    # Package installation
-├── requirements.txt            # Core dependencies
-└── requirements-dev.txt        # Dev dependencies
-```
-
----
-
-## 📊 Implemented Features
-
-### ✅ Phase 1: Core Tracking (Complete)
-
-- **DataCollector**: SQLite-based step & episode storage
-- **RewardDecomposer**: Component tracking with online statistics
-- Welford's algorithm for efficient variance computation
-- Support for auto-extraction from info dicts
-- Query interface for data retrieval
-
-### ✅ Phase 2: Hacking Detection (Complete)
-
-Six detector types:
-1. **State Cycling**: Detects degenerate state loops
-2. **Action Repetition**: Identifies action repetition exploits
-3. **Component Imbalance**: Tracks reward component dominance
-4. **Reward Spiking**: Z-score based anomaly detection
-5. **Boundary Exploitation**: Detects boundary value exploits
-6. **Hacking Score**: Aggregated 0-1 likelihood score
-
----
-
-## 🔧 Troubleshooting
-
-### Import errors
-
-```bash
-# Make sure you're in the repo root and run:
-pip install -e .
-
-# Or set PYTHONPATH:
-export PYTHONPATH="${PYTHONPATH}:$(pwd)"
-```
-
-### Missing dependencies
-
-```bash
-# Install all dependencies
-pip install -r requirements-dev.txt
-```
-
-### Tests fail with "No module named 'reward_scope'"
-
-```bash
-# Run from repo root, not from tests/ directory
-cd /path/to/reward-forensics
-pytest tests/ -v
-```
-
-### Gymnasium version issues
-
-```bash
-# Upgrade gymnasium
-pip install --upgrade gymnasium
-```
-
----
-
-## 🎯 Development Workflow
-
-```bash
-# 1. Create virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-# 2. Install in editable mode with dev dependencies
+git clone https://github.com/your-org/reward-scope
+cd reward-scope
 pip install -e ".[dev]"
 
-# 3. Make changes to code
+# Run tests
+pytest tests/
 
-# 4. Run tests
-pytest tests/ -v
-
-# 5. Format code (optional)
-black reward_scope/ tests/ examples/
-
-# 6. Lint code (optional)
-ruff check reward_scope/ tests/
+# Run examples
+python examples/cartpole_basic.py
 ```
 
----
-
-## 📚 Next Steps
-
-### Phase 3: Integrations (Planned)
-- Gymnasium environment wrapper
-- Stable-Baselines3 callback
-- Integration examples with PPO/DQN
-
-### Phase 4: Dashboard (Planned)
-- FastAPI backend
-- Real-time visualization with HTMX
-- WebSocket live updates
-- Alert management UI
-
----
-
-## 📝 License
-
-MIT License - see LICENSE file for details
-
----
-
-## 🙏 Contributing
+## Contributing
 
 Contributions welcome! Please:
 1. Fork the repository
 2. Create a feature branch
-3. Add tests for new features
-4. Ensure all tests pass (`pytest tests/ -v`)
-5. Submit a pull request
+3. Add tests for new functionality
+4. Submit a pull request
+
+## Citation
+
+If you use RewardScope in your research, please cite:
+
+```bibtex
+@software{rewardscope2024,
+  title = {RewardScope: Real-time Reward Debugging for Reinforcement Learning},
+  author = {Your Name},
+  year = {2024},
+  url = {https://github.com/your-org/reward-scope}
+}
+```
+
+## License
+
+MIT License - see [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- Inspired by research on reward misspecification and specification gaming
+- Built with FastAPI, Gymnasium, and Stable-Baselines3
+- Dashboard powered by HTMX and Chart.js (no build step!)
+
+## Related Work
+
+- [Specification gaming examples](https://docs.google.com/spreadsheets/d/e/2PACX-1vRPiprOaC3HsCf5Tuum8bRfzYUiKLRqJmbOoC-32JorNdfyTiRRsR7Ea5eWtvsWzuxo8bjOxCG84dAg/pubhtml) (DeepMind)
+- [Concrete Problems in AI Safety](https://arxiv.org/abs/1606.06565) (Amodei et al., 2016)
+- [Anthropic's research on AI alignment](https://www.anthropic.com/research)
 
 ---
 
-## 📮 Questions?
-
-Open an issue on GitHub or check the examples/ directory for usage patterns.
+**Made with ❤️ for safer RL development**
