@@ -91,6 +91,9 @@ class TestRewardScopeWrapper:
         assert wrapped_env.step_count >= 10
         assert wrapped_env.collector.conn is not None
 
+        # Flush buffer to ensure data is in database
+        wrapped_env.collector._flush_step_buffer()
+
         # Check that steps were logged
         recent_steps = wrapped_env.collector.get_recent_steps(n=5)
         assert len(recent_steps) > 0
