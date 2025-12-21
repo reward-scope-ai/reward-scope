@@ -1,0 +1,12 @@
+# Development dependencies
+-r requirements.txt
+
+# Testing
+pytest>=7.0.0
+
+# Code quality
+black>=23.0.0
+ruff>=0.0.280
+
+# Optional: For examples
+stable-baselines3>=2.0.0
