@@ -2,5 +2,8 @@
 numpy>=1.21.0
 gymnasium>=0.28.0
 
-# Optional: Stable-Baselines3 integration (uncomment if needed)
-# stable-baselines3>=2.0.0
+# Optional: Stable-Baselines3 integration
+stable-baselines3>=2.0.0
+
+# Testing
+pytest>=7.0.0
