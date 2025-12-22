@@ -331,13 +331,14 @@ main {
     padding: 1.5rem;
     overflow-y: auto;
     overflow-x: hidden;
-    margin: 0 auto;
 }
 
 .grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
     gap: 1.5rem;
+    max-width: 2000px;
+    margin: 0 auto;
 }
 
 .card {
