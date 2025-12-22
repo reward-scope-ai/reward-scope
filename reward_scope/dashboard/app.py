@@ -154,15 +154,16 @@ async def get_episode_history(n: int = 50):
 @app.get("/api/alerts")
 async def get_alerts():
     """
-    Get recent hacking alerts.
+    Get recent hacking alerts grouped by (episode, alert_type).
 
     Returns:
         {
-            "alerts": [
+            "alert_groups": [
                 {
                     "episode": int,
-                    "type": str,
-                    "severity": float,
+                    "alert_type": str,
+                    "count": int,
+                    "max_severity": float,
                     "description": str
                 }
             ]
@@ -172,18 +173,39 @@ async def get_alerts():
         return {"error": "No data collector initialized"}
 
     try:
-        episodes = collector.get_episode_history(10)
-        alerts = []
-        for ep in episodes:
-            for flag in ep.hacking_flags:
-                alerts.append({
-                    "episode": ep.episode,
-                    "type": flag,
-                    "severity": ep.hacking_score,
-                    "description": flag.replace("_", " ").title(),
-                })
+        episodes = collector.get_episode_history(50)  # Get more episodes for better grouping
 
-        return {"alerts": alerts}
+        # Group alerts by (episode, type)
+        from collections import defaultdict
+        alert_groups = defaultdict(lambda: {"count": 0, "severity": 0.0})
+
+        for ep in episodes:
+            # Count occurrences of each alert type in this episode
+            from collections import Counter
+            flag_counts = Counter(ep.hacking_flags)
+
+            for flag, count in flag_counts.items():
+                key = (ep.episode, flag)
+                alert_groups[key] = {
+                    "count": count,
+                    "severity": ep.hacking_score,
+                }
+
+        # Convert to list format for response
+        grouped_alerts = []
+        for (episode, alert_type), data in alert_groups.items():
+            grouped_alerts.append({
+                "episode": episode,
+                "alert_type": alert_type,
+                "count": data["count"],
+                "max_severity": data["severity"],
+                "description": alert_type.replace("_", " ").title(),
+            })
+
+        # Sort by episode (descending) and then by severity (descending)
+        grouped_alerts.sort(key=lambda x: (x["episode"], x["max_severity"]), reverse=True)
+
+        return {"alert_groups": grouped_alerts}
     except Exception as e:
         return {"error": str(e)}
 

@@ -285,17 +285,37 @@ document.body.addEventListener('htmx:afterSwap', function(event) {
         const alertsData = event.detail.xhr.response;
         try {
             const data = JSON.parse(alertsData);
-            if (data.alerts && data.alerts.length > 0) {
+            if (data.alert_groups && data.alert_groups.length > 0) {
                 let html = '';
-                data.alerts.forEach(alert => {
-                    const severityClass = alert.severity > 0.7 ? 'alert-item' : 
-                                         alert.severity > 0.4 ? 'alert-item warning' : 
+                data.alert_groups.forEach((group, index) => {
+                    const severityClass = group.max_severity > 0.7 ? 'alert-item' :
+                                         group.max_severity > 0.4 ? 'alert-item warning' :
                                          'alert-item info';
+                    const groupId = `alert-group-${index}`;
+
                     html += `
-                        <div class="${severityClass}">
-                            <div class="type">${alert.type}</div>
-                            <div class="description">${alert.description}</div>
-                            <div class="episode">Episode ${alert.episode} • Severity: ${(alert.severity * 100).toFixed(0)}%</div>
+                        <div class="${severityClass} alert-group" data-group-id="${groupId}">
+                            <div class="alert-header" onclick="toggleAlertGroup('${groupId}')">
+                                <div class="alert-main">
+                                    <div class="type">${group.description}</div>
+                                    <span class="count-badge">${group.count}x</span>
+                                </div>
+                                <div class="alert-meta">
+                                    <span class="episode-info">Episode ${group.episode}</span>
+                                    <span class="severity-info">Severity: ${(group.max_severity * 100).toFixed(0)}%</span>
+                                    <span class="chevron">▼</span>
+                                </div>
+                            </div>
+                            <div class="alert-details" id="${groupId}" style="display: none;">
+                                <div class="occurrences-container">
+                                    <p class="occurrences-note">
+                                        This alert was detected ${group.count} time${group.count > 1 ? 's' : ''} in episode ${group.episode}.
+                                    </p>
+                                    <p class="occurrences-info">
+                                        <em>Note: Individual timestamps are not currently tracked. Future versions will show detailed occurrence timestamps.</em>
+                                    </p>
+                                </div>
+                            </div>
                         </div>
                     `;
                 });
@@ -308,4 +328,21 @@ document.body.addEventListener('htmx:afterSwap', function(event) {
         }
     }
 });
+
+// Toggle alert group expansion
+function toggleAlertGroup(groupId) {
+    const detailsDiv = document.getElementById(groupId);
+    const groupDiv = document.querySelector(`[data-group-id="${groupId}"]`);
+    const chevron = groupDiv.querySelector('.chevron');
+
+    if (detailsDiv.style.display === 'none') {
+        detailsDiv.style.display = 'block';
+        chevron.textContent = '▲';
+        groupDiv.classList.add('expanded');
+    } else {
+        detailsDiv.style.display = 'none';
+        chevron.textContent = '▼';
+        groupDiv.classList.remove('expanded');
+    }
+}
 

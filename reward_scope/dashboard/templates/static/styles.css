@@ -461,6 +461,138 @@ main {
     padding: 2rem;
 }
 
+/* Grouped Alerts */
+.alert-group {
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.alert-group.expanded {
+    margin-bottom: 1rem;
+}
+
+.alert-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.alert-header:hover {
+    opacity: 0.9;
+}
+
+.alert-main {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.count-badge {
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #fff;
+    padding: 0.15rem 0.5rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.alert-item.warning .count-badge {
+    background: rgba(245, 158, 11, 0.15);
+    border-color: rgba(245, 158, 11, 0.3);
+    color: #f59e0b;
+}
+
+.alert-item.info .count-badge {
+    background: rgba(59, 130, 246, 0.15);
+    border-color: rgba(59, 130, 246, 0.3);
+    color: #3b82f6;
+}
+
+.alert-item .count-badge {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: rgba(239, 68, 68, 0.3);
+    color: #ef4444;
+}
+
+.alert-meta {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    font-size: 0.7rem;
+    color: #666;
+    flex-wrap: wrap;
+}
+
+.episode-info,
+.severity-info {
+    color: #888;
+}
+
+.chevron {
+    font-size: 0.6rem;
+    color: #999;
+    margin-left: auto;
+    transition: transform 0.2s ease;
+    user-select: none;
+}
+
+.alert-group.expanded .chevron {
+    transform: rotate(180deg);
+}
+
+.alert-details {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.occurrences-container {
+    max-height: 200px;
+    overflow-y: auto;
+    padding: 0.5rem 0;
+}
+
+.occurrences-container::-webkit-scrollbar {
+    width: 6px;
+}
+
+.occurrences-container::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 3px;
+}
+
+.occurrences-container::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+}
+
+.occurrences-container::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.occurrences-note {
+    font-size: 0.75rem;
+    color: #aaa;
+    margin: 0.5rem 0;
+}
+
+.occurrences-info {
+    font-size: 0.7rem;
+    color: #666;
+    margin: 0.5rem 0;
+    padding: 0.5rem;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+}
+
+.occurrences-info em {
+    font-style: italic;
+    color: #888;
+}
+
 /* Sidebar Overlay (for mobile) */
 .sidebar-overlay {
     display: none;
