@@ -10,88 +10,173 @@
     {% block head %}{% endblock %}
 </head>
 <body>
-    <header>
-        <div class="header-content">
-            <h1>🔬 RewardScope</h1>
-            <div class="header-controls">
-                <div class="run-selector">
-                    <label for="run-select">Run:</label>
-                    <select id="run-select" class="run-dropdown">
-                        <option value="">Select a run...</option>
-                    </select>
-                </div>
-                {% block header %}{% endblock %}
-            </div>
-        </div>
-    </header>
+    <!-- Mobile sidebar overlay -->
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
-    <main>
-        {% block content %}{% endblock %}
-    </main>
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+            <h2 class="sidebar-title">RUNS</h2>
+            <button class="mobile-close" id="mobile-close" aria-label="Close sidebar">✕</button>
+        </div>
+
+        <div class="sidebar-search">
+            <input type="search" id="run-search" placeholder="Search runs..." />
+        </div>
+
+        <div class="sidebar-runs" id="sidebar-runs">
+            <div class="sidebar-loading">Loading runs...</div>
+        </div>
+
+        <button class="sidebar-toggle" id="sidebar-toggle" aria-label="Toggle sidebar">
+            <span class="toggle-icon">◀</span>
+        </button>
+    </aside>
+
+    <div class="app-container">
+        <header>
+            <div class="header-content">
+                <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Open menu">☰</button>
+                <h1>🔬 RewardScope</h1>
+                <div class="header-controls">
+                    {% block header %}{% endblock %}
+                </div>
+            </div>
+        </header>
+
+        <main>
+            {% block content %}{% endblock %}
+        </main>
+    </div>
 
     <script>
-        // Load available runs on page load
+        // Sidebar state management
+        const sidebar = document.getElementById('sidebar');
+        const sidebarToggle = document.getElementById('sidebar-toggle');
+        const sidebarOverlay = document.getElementById('sidebar-overlay');
+        const mobileMenuBtn = document.getElementById('mobile-menu-btn');
+        const mobileClose = document.getElementById('mobile-close');
+        const runSearch = document.getElementById('run-search');
+
+        // Load sidebar state from localStorage
+        const sidebarCollapsed = localStorage.getItem('sidebar-collapsed') === 'true';
+        if (sidebarCollapsed) {
+            sidebar.classList.add('collapsed');
+        }
+
+        // Toggle sidebar
+        function toggleSidebar() {
+            sidebar.classList.toggle('collapsed');
+            localStorage.setItem('sidebar-collapsed', sidebar.classList.contains('collapsed'));
+        }
+
+        sidebarToggle.addEventListener('click', toggleSidebar);
+
+        // Mobile menu handling
+        mobileMenuBtn.addEventListener('click', () => {
+            sidebar.classList.add('mobile-open');
+            sidebarOverlay.classList.add('visible');
+        });
+
+        function closeMobileSidebar() {
+            sidebar.classList.remove('mobile-open');
+            sidebarOverlay.classList.remove('visible');
+        }
+
+        mobileClose.addEventListener('click', closeMobileSidebar);
+        sidebarOverlay.addEventListener('click', closeMobileSidebar);
+
+        // Load available runs
+        let allRuns = [];
+        let currentRunName = '';
+
         async function loadRuns() {
             try {
                 const response = await fetch('/api/runs');
                 const data = await response.json();
-                const select = document.getElementById('run-select');
-
-                // Clear existing options except the first one
-                select.innerHTML = '<option value="">Select a run...</option>';
-
-                // Add runs to dropdown
-                data.runs.forEach(run => {
-                    const option = document.createElement('option');
-                    option.value = run.name;
-                    option.textContent = `${run.name} (${run.episode_count} eps, score: ${run.max_hacking_score.toFixed(2)}, ${run.created_date})`;
-                    option.dataset.episodes = run.episode_count;
-                    option.dataset.hackingScore = run.max_hacking_score;
-                    option.dataset.date = run.created_date;
-
-                    // Mark current run as selected
-                    if (run.name === data.current_run) {
-                        option.selected = true;
-                    }
-
-                    select.appendChild(option);
-                });
+                allRuns = data.runs;
+                currentRunName = data.current_run;
+                renderRuns(allRuns);
             } catch (error) {
                 console.error('Failed to load runs:', error);
+                document.getElementById('sidebar-runs').innerHTML =
+                    '<div class="sidebar-error">Failed to load runs</div>';
             }
         }
 
-        // Handle run selection
-        document.addEventListener('DOMContentLoaded', function() {
-            loadRuns();
+        function renderRuns(runs) {
+            const container = document.getElementById('sidebar-runs');
 
-            const select = document.getElementById('run-select');
-            select.addEventListener('change', async function() {
-                const runName = this.value;
-                if (!runName) return;
+            if (runs.length === 0) {
+                container.innerHTML = '<div class="sidebar-empty">No runs found</div>';
+                return;
+            }
 
-                try {
-                    const response = await fetch('/api/select-run', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({ run_name: runName })
-                    });
+            container.innerHTML = runs.map(run => `
+                <div class="run-card ${run.name === currentRunName ? 'active' : ''}"
+                     data-run-name="${run.name}">
+                    <div class="run-indicator">
+                        <span class="run-dot ${run.name === currentRunName ? 'active' : ''}"></span>
+                    </div>
+                    <div class="run-info">
+                        <div class="run-name">${run.name}</div>
+                        <div class="run-meta">
+                            <span class="run-episodes">${run.episode_count} eps</span>
+                            <span class="run-score">score: ${run.max_hacking_score.toFixed(2)}</span>
+                        </div>
+                        <div class="run-date">${run.created_date.split(' ')[0]}</div>
+                    </div>
+                </div>
+            `).join('');
 
-                    const data = await response.json();
-                    if (data.success) {
-                        // Reload the page to show new run data
-                        window.location.reload();
-                    } else {
-                        alert('Failed to load run: ' + (data.error || 'Unknown error'));
-                    }
-                } catch (error) {
-                    console.error('Failed to select run:', error);
-                    alert('Failed to load run');
-                }
+            // Add click handlers
+            container.querySelectorAll('.run-card').forEach(card => {
+                card.addEventListener('click', async function() {
+                    const runName = this.dataset.runName;
+                    if (runName === currentRunName) return;
+
+                    await selectRun(runName);
+                });
             });
+        }
+
+        // Search/filter runs
+        runSearch.addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase();
+            const filteredRuns = allRuns.filter(run =>
+                run.name.toLowerCase().includes(query)
+            );
+            renderRuns(filteredRuns);
         });
+
+        // Select a run
+        async function selectRun(runName) {
+            try {
+                const response = await fetch('/api/select-run', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ run_name: runName })
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    // Close mobile sidebar if open
+                    closeMobileSidebar();
+                    // Reload the page to show new run data
+                    window.location.reload();
+                } else {
+                    alert('Failed to load run: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Failed to select run:', error);
+                alert('Failed to load run');
+            }
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', loadRuns);
     </script>
 
     {% block scripts %}{% endblock %}
