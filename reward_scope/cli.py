@@ -17,27 +17,28 @@ def cli():
 @cli.command()
 @click.option('--port', default=8050, help='Dashboard port')
 @click.option('--data-dir', default='./reward_scope_data', help='Data directory')
-@click.option('--run-name', required=True, help='Run name to display')
+@click.option('--run-name', default=None, help='Run name to display (optional - can be selected in UI)')
 @click.option('--host', default='0.0.0.0', help='Host to bind to')
 def dashboard(port: int, data_dir: str, run_name: str, host: str):
     """Start the web dashboard."""
     from reward_scope.dashboard.app import run_dashboard
-    
+
     # Check if data directory exists
     data_path = Path(data_dir)
     if not data_path.exists():
         click.echo(f"❌ Error: Data directory not found: {data_dir}", err=True)
         sys.exit(1)
-    
-    # Check if database exists
-    db_path = data_path / f"{run_name}.db"
-    if not db_path.exists():
-        click.echo(f"❌ Error: Database not found: {db_path}", err=True)
-        click.echo(f"\nAvailable runs in {data_dir}:")
-        for db_file in data_path.glob("*.db"):
-            click.echo(f"  - {db_file.stem}")
-        sys.exit(1)
-    
+
+    # If run_name is provided, check if database exists
+    if run_name:
+        db_path = data_path / f"{run_name}.db"
+        if not db_path.exists():
+            click.echo(f"❌ Error: Database not found: {db_path}", err=True)
+            click.echo(f"\nAvailable runs in {data_dir}:")
+            for db_file in data_path.glob("*.db"):
+                click.echo(f"  - {db_file.stem}")
+            sys.exit(1)
+
     run_dashboard(data_dir, run_name, port, host)
 
 

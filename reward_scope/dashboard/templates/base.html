@@ -11,14 +11,89 @@
 </head>
 <body>
     <header>
-        <h1>🔬 RewardScope</h1>
-        {% block header %}{% endblock %}
+        <div class="header-content">
+            <h1>🔬 RewardScope</h1>
+            <div class="header-controls">
+                <div class="run-selector">
+                    <label for="run-select">Run:</label>
+                    <select id="run-select" class="run-dropdown">
+                        <option value="">Select a run...</option>
+                    </select>
+                </div>
+                {% block header %}{% endblock %}
+            </div>
+        </div>
     </header>
-    
+
     <main>
         {% block content %}{% endblock %}
     </main>
-    
+
+    <script>
+        // Load available runs on page load
+        async function loadRuns() {
+            try {
+                const response = await fetch('/api/runs');
+                const data = await response.json();
+                const select = document.getElementById('run-select');
+
+                // Clear existing options except the first one
+                select.innerHTML = '<option value="">Select a run...</option>';
+
+                // Add runs to dropdown
+                data.runs.forEach(run => {
+                    const option = document.createElement('option');
+                    option.value = run.name;
+                    option.textContent = `${run.name} (${run.episode_count} eps, score: ${run.max_hacking_score.toFixed(2)}, ${run.created_date})`;
+                    option.dataset.episodes = run.episode_count;
+                    option.dataset.hackingScore = run.max_hacking_score;
+                    option.dataset.date = run.created_date;
+
+                    // Mark current run as selected
+                    if (run.name === data.current_run) {
+                        option.selected = true;
+                    }
+
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error('Failed to load runs:', error);
+            }
+        }
+
+        // Handle run selection
+        document.addEventListener('DOMContentLoaded', function() {
+            loadRuns();
+
+            const select = document.getElementById('run-select');
+            select.addEventListener('change', async function() {
+                const runName = this.value;
+                if (!runName) return;
+
+                try {
+                    const response = await fetch('/api/select-run', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ run_name: runName })
+                    });
+
+                    const data = await response.json();
+                    if (data.success) {
+                        // Reload the page to show new run data
+                        window.location.reload();
+                    } else {
+                        alert('Failed to load run: ' + (data.error || 'Unknown error'));
+                    }
+                } catch (error) {
+                    console.error('Failed to select run:', error);
+                    alert('Failed to load run');
+                }
+            });
+        });
+    </script>
+
     {% block scripts %}{% endblock %}
 </body>
 </html>

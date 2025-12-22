@@ -21,6 +21,7 @@ app = FastAPI(title="RewardScope Dashboard", version="0.1.0")
 # Global state (set by run_dashboard function)
 collector: Optional[DataCollector] = None
 run_name: str = "unknown"
+data_dir: str = "./reward_scope_data"
 
 # Templates directory
 templates_dir = Path(__file__).parent / "templates"
@@ -154,7 +155,7 @@ async def get_episode_history(n: int = 50):
 async def get_alerts():
     """
     Get recent hacking alerts.
-    
+
     Returns:
         {
             "alerts": [
@@ -169,7 +170,7 @@ async def get_alerts():
     """
     if not collector:
         return {"error": "No data collector initialized"}
-    
+
     try:
         episodes = collector.get_episode_history(10)
         alerts = []
@@ -181,10 +182,123 @@ async def get_alerts():
                     "severity": ep.hacking_score,
                     "description": flag.replace("_", " ").title(),
                 })
-        
+
         return {"alerts": alerts}
     except Exception as e:
         return {"error": str(e)}
+
+
+@app.get("/api/runs")
+async def get_runs():
+    """
+    Get list of available training runs.
+
+    Scans data_dir for .db files and returns metadata for each run.
+
+    Returns:
+        {
+            "runs": [
+                {
+                    "name": str,
+                    "episode_count": int,
+                    "max_hacking_score": float,
+                    "created_timestamp": float,
+                    "created_date": str
+                }
+            ],
+            "current_run": str
+        }
+    """
+    import sqlite3
+    from datetime import datetime
+
+    runs = []
+    data_path = Path(data_dir)
+
+    if not data_path.exists():
+        return {"runs": [], "current_run": run_name}
+
+    # Scan for all .db files
+    for db_file in data_path.glob("*.db"):
+        try:
+            # Connect to database
+            conn = sqlite3.connect(str(db_file))
+            cursor = conn.cursor()
+
+            # Get episode count
+            cursor.execute("SELECT COUNT(*) FROM episodes")
+            episode_count = cursor.fetchone()[0]
+
+            # Get max hacking score
+            cursor.execute("SELECT MAX(hacking_score) FROM episodes")
+            max_hacking_result = cursor.fetchone()[0]
+            max_hacking_score = max_hacking_result if max_hacking_result is not None else 0.0
+
+            # Get created timestamp (from first episode or file creation time)
+            cursor.execute("SELECT MIN(start_time) FROM episodes")
+            created_timestamp_result = cursor.fetchone()[0]
+            if created_timestamp_result:
+                created_timestamp = created_timestamp_result
+            else:
+                # Fallback to file creation time
+                created_timestamp = db_file.stat().st_ctime
+
+            conn.close()
+
+            runs.append({
+                "name": db_file.stem,
+                "episode_count": episode_count,
+                "max_hacking_score": max_hacking_score,
+                "created_timestamp": created_timestamp,
+                "created_date": datetime.fromtimestamp(created_timestamp).strftime('%Y-%m-%d %H:%M:%S'),
+            })
+        except Exception as e:
+            # Skip databases that can't be read
+            print(f"Error reading {db_file}: {e}")
+            continue
+
+    # Sort by timestamp descending (most recent first)
+    runs.sort(key=lambda x: x["created_timestamp"], reverse=True)
+
+    return {"runs": runs, "current_run": run_name}
+
+
+@app.post("/api/select-run")
+async def select_run(request: Request):
+    """
+    Select a different run to view.
+
+    Body:
+        {
+            "run_name": str
+        }
+
+    Returns:
+        {
+            "success": bool,
+            "run_name": str
+        }
+    """
+    global collector, run_name
+
+    try:
+        body = await request.json()
+        new_run_name = body.get("run_name")
+
+        if not new_run_name:
+            return {"success": False, "error": "No run_name provided"}
+
+        # Close existing collector if any
+        if collector:
+            collector.close()
+
+        # Create new collector
+        run_name = new_run_name
+        collector = DataCollector(run_name, data_dir)
+
+        return {"success": True, "run_name": run_name}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 @app.websocket("/ws/live")
@@ -237,30 +351,40 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 def run_dashboard(
-    data_dir: str,
-    run_name_param: str,
+    data_dir_param: str,
+    run_name_param: Optional[str] = None,
     port: int = 8050,
     host: str = "0.0.0.0",
 ):
     """
     Start the dashboard server.
-    
+
     Args:
-        data_dir: Directory containing the SQLite database
-        run_name_param: Name of the run to display
+        data_dir_param: Directory containing the SQLite database
+        run_name_param: Name of the run to display (optional - can be selected in UI)
         port: Port to run the server on
         host: Host to bind to
     """
-    global collector, run_name
-    
-    run_name = run_name_param
-    collector = DataCollector(run_name, data_dir)
-    
-    print(f"\n🔬 RewardScope Dashboard Starting...")
-    print(f"   Run: {run_name}")
-    print(f"   URL: http://localhost:{port}")
-    print(f"   Data: {data_dir}\n")
-    
+    global collector, run_name, data_dir
+
+    data_dir = data_dir_param
+
+    if run_name_param:
+        run_name = run_name_param
+        collector = DataCollector(run_name, data_dir)
+        print(f"\n🔬 RewardScope Dashboard Starting...")
+        print(f"   Run: {run_name}")
+        print(f"   URL: http://localhost:{port}")
+        print(f"   Data: {data_dir}\n")
+    else:
+        # Browser mode - no run selected yet
+        run_name = ""
+        collector = None
+        print(f"\n🔬 RewardScope Dashboard Starting (Browser Mode)...")
+        print(f"   URL: http://localhost:{port}")
+        print(f"   Data: {data_dir}")
+        print(f"   Select a run from the dropdown in the UI\n")
+
     import uvicorn
     uvicorn.run(app, host=host, port=port, log_level="warning")
 
