@@ -20,6 +20,7 @@ body {
 
 /* Sidebar Styles */
 .sidebar {
+    position: relative;
     width: 250px;
     flex-shrink: 0;
     background: #1a1a1a;
