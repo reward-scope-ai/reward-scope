@@ -245,6 +245,12 @@ MIT License - see [LICENSE](LICENSE) file for details.
 - Built with FastAPI, Gymnasium, and Stable-Baselines3
 - Dashboard powered by HTMX and Chart.js (no build step!)
 
+
+## Contributors
+
+- James Bentley
+- Brian Tao
+
 ## Related Work
 
 - [Specification gaming examples](https://docs.google.com/spreadsheets/d/e/2PACX-1vRPiprOaC3HsCf5Tuum8bRfzYUiKLRqJmbOoC-32JorNdfyTiRRsR7Ea5eWtvsWzuxo8bjOxCG84dAg/pubhtml) (DeepMind)
