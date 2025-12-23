@@ -219,12 +219,12 @@ alert = HackingAlert(
 Start the web dashboard:
 
 ```bash
-reward-scope dashboard \\
-    --run-name my_experiment \\
-    --data-dir ./reward_scope_data \\
-    --port 8050 \\
-    --host 0.0.0.0
+reward-scope dashboard \
+    --data-dir ./reward_scope_data \
+    --port 8050
 ```
+
+**Note:** Select training runs from the sidebar in the dashboard UI.
 
 ### list-runs
 
