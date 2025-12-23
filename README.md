@@ -231,7 +231,7 @@ If you use RewardScope in your research, please cite:
   title = {RewardScope: Real-time Reward Debugging for Reinforcement Learning},
   author = {James Bentley},
   year = {2025},
-  url = {https://github.com/jimmybentley/reward-scope}
+  url = {https://github.com/reward-scope-ai/reward-scope}
 }
 ```
 
