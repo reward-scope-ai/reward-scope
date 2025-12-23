@@ -83,6 +83,11 @@ CREATE TABLE IF NOT EXISTS episodes (
     hacking_flags TEXT  -- JSON
 );
 
+CREATE TABLE IF NOT EXISTS live_state (
+    key TEXT PRIMARY KEY,
+    value TEXT  -- JSON
+);
+
 CREATE INDEX IF NOT EXISTS idx_steps_episode ON steps(episode);
 CREATE INDEX IF NOT EXISTS idx_steps_step ON steps(step);
 CREATE INDEX IF NOT EXISTS idx_episodes_episode ON episodes(episode);
@@ -311,6 +316,65 @@ class DataCollector:
                 _serialize_to_json(hacking_flags),
                 episode,
             )
+        )
+        self.conn.commit()
+
+    def update_live_hacking_state(
+        self,
+        episode: int,
+        hacking_score: float,
+        alert_count: int,
+    ) -> None:
+        """
+        Update live hacking state for in-progress episode.
+
+        Args:
+            episode: Current episode number
+            hacking_score: Current hacking score (0-1)
+            alert_count: Number of alerts detected so far
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO live_state (key, value)
+            VALUES ('current_hacking', ?)
+            """,
+            (
+                _serialize_to_json({
+                    "episode": episode,
+                    "hacking_score": hacking_score,
+                    "alert_count": alert_count,
+                    "timestamp": time.time(),
+                }),
+            )
+        )
+        self.conn.commit()
+
+    def get_live_hacking_state(self) -> Optional[Dict[str, Any]]:
+        """
+        Get live hacking state for in-progress episode.
+
+        Returns:
+            Dict with episode, hacking_score, alert_count, timestamp, or None if not available
+        """
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            SELECT value FROM live_state WHERE key = 'current_hacking'
+            """
+        )
+        row = cursor.fetchone()
+        if row:
+            return _deserialize_from_json(row[0])
+        return None
+
+    def clear_live_hacking_state(self) -> None:
+        """Clear live hacking state (call when episode completes)."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            """
+            DELETE FROM live_state WHERE key = 'current_hacking'
+            """
         )
         self.conn.commit()
 

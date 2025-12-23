@@ -210,6 +210,51 @@ async def get_alerts():
         return {"error": str(e)}
 
 
+@app.get("/api/live-hacking")
+async def get_live_hacking():
+    """
+    Get live hacking score for in-progress episode.
+
+    Returns:
+        {
+            "episode": int,
+            "current_score": float,
+            "alert_count": int,
+            "in_progress": bool,
+            "timestamp": float  # Unix timestamp of last update
+        }
+    """
+    if not collector:
+        return {"error": "No data collector initialized"}
+
+    try:
+        live_state = collector.get_live_hacking_state()
+
+        if live_state:
+            # Check if state is recent (within last 10 seconds)
+            import time
+            is_recent = (time.time() - live_state.get("timestamp", 0)) < 10
+
+            return {
+                "episode": live_state.get("episode", 0),
+                "current_score": live_state.get("hacking_score", 0.0),
+                "alert_count": live_state.get("alert_count", 0),
+                "in_progress": is_recent,
+                "timestamp": live_state.get("timestamp", 0),
+            }
+        else:
+            # No live state available
+            return {
+                "episode": 0,
+                "current_score": 0.0,
+                "alert_count": 0,
+                "in_progress": False,
+                "timestamp": 0,
+            }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/api/runs")
 async def get_runs():
     """

@@ -233,10 +233,20 @@ async function fetchInitialData() {
             episodeChart.data.datasets[0].data = episodeData.total_rewards;
             episodeChart.update();
 
-            // Update hacking score from latest episode
-            if (episodeData.hacking_scores && episodeData.hacking_scores.length > 0) {
-                const latestScore = episodeData.hacking_scores[episodeData.hacking_scores.length - 1];
-                document.getElementById('hacking-score').textContent = latestScore.toFixed(2);
+            // Check for live hacking score first (in-progress episode)
+            const liveRes = await fetch('/api/live-hacking');
+            const liveData = await liveRes.json();
+
+            if (!liveData.error && liveData.in_progress) {
+                // Show live score with indicator
+                const scoreText = `${liveData.current_score.toFixed(2)} (in progress)`;
+                document.getElementById('hacking-score').textContent = scoreText;
+            } else {
+                // Fall back to latest completed episode score
+                if (episodeData.hacking_scores && episodeData.hacking_scores.length > 0) {
+                    const latestScore = episodeData.hacking_scores[episodeData.hacking_scores.length - 1];
+                    document.getElementById('hacking-score').textContent = latestScore.toFixed(2);
+                }
             }
         }
     } catch (error) {
@@ -267,10 +277,20 @@ setInterval(async () => {
             episodeChart.data.datasets[0].data = episodeData.total_rewards;
             episodeChart.update();
 
-            // Update hacking score from latest episode
-            if (episodeData.hacking_scores && episodeData.hacking_scores.length > 0) {
-                const latestScore = episodeData.hacking_scores[episodeData.hacking_scores.length - 1];
-                document.getElementById('hacking-score').textContent = latestScore.toFixed(2);
+            // Check for live hacking score first (in-progress episode)
+            const liveRes = await fetch('/api/live-hacking');
+            const liveData = await liveRes.json();
+
+            if (!liveData.error && liveData.in_progress) {
+                // Show live score with indicator
+                const scoreText = `${liveData.current_score.toFixed(2)} (in progress)`;
+                document.getElementById('hacking-score').textContent = scoreText;
+            } else {
+                // Fall back to latest completed episode score
+                if (episodeData.hacking_scores && episodeData.hacking_scores.length > 0) {
+                    const latestScore = episodeData.hacking_scores[episodeData.hacking_scores.length - 1];
+                    document.getElementById('hacking-score').textContent = latestScore.toFixed(2);
+                }
             }
         }
     } catch (error) {

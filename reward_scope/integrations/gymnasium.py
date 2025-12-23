@@ -147,6 +147,7 @@ class RewardScopeWrapper(gym.Wrapper):
         self.current_episode_step = 0
         self._last_observation = None
         self._last_action = None
+        self._live_update_interval = 50  # Update DB every N steps for live dashboard
 
         # Start dashboard if requested
         if start_dashboard:
@@ -295,11 +296,29 @@ class RewardScopeWrapper(gym.Wrapper):
         self.step_count += 1
         self.current_episode_step += 1
 
+        # Update live hacking score periodically (for dashboard)
+        if self.current_episode_step % self._live_update_interval == 0:
+            self._update_live_hacking_score()
+
         # Handle episode end
         if terminated or truncated:
             self._end_episode()
 
         return obs, reward, terminated, truncated, info
+
+    def _update_live_hacking_score(self) -> None:
+        """Update the database with current in-progress hacking score."""
+        # Get current hacking score and alert count from detector suite
+        hacking_score = self.detector_suite.get_hacking_score()
+        alert_count = len(self.detector_suite.get_all_alerts())
+
+        # Update live state in database (for dashboard to read)
+        if self.current_episode_step > 0:
+            self.collector.update_live_hacking_state(
+                episode=self.episode_count,
+                hacking_score=hacking_score,
+                alert_count=alert_count,
+            )
 
     def _end_episode(self) -> None:
         """End the current episode and run episode-level checks."""
@@ -325,6 +344,9 @@ class RewardScopeWrapper(gym.Wrapper):
             hacking_score=hacking_score,
             hacking_flags=hacking_flags,
         )
+
+        # Clear live state now that episode is complete
+        self.collector.clear_live_hacking_state()
 
         # Reset detectors for next episode
         self.detector_suite.reset()
