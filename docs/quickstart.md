@@ -11,7 +11,7 @@ pip install reward-scope
 Or install from source:
 
 ```bash
-git clone https://github.com/your-org/reward-scope
+git clone https://github.com/reward-scope-ai/reward-scope
 cd reward-scope
 pip install -e .
 ```
