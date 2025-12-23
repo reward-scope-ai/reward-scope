@@ -28,9 +28,9 @@ https://github.com/user-attachments/assets/6ca3ba70-ad0c-418e-8146-5c9616669215
 
 ## Why This Matters
 
-Reward hacking, where agents exploit imperfect proxy rewards, is a well-documented problem that's mathematically difficult to eliminate through reward design alone. The theory suggests unhackable reward functions are nearly impossible to construct, so detection during training becomes essential.
+Reward hacking, where agents exploit imperfect proxy rewards, is a [well-documented problem](https://arxiv.org/abs/2209.13085) that's mathematically difficult to eliminate through reward design alone. The theory suggests unhackable reward functions are nearly impossible to construct, so detection during training becomes essential.
 
-Left unchecked, reward hacking leads to policies that score well but behave poorly. Recent research from Anthropic found that models learning to exploit reward functions also develop alignment faking and deceptive behaviors, patterns that generalize beyond the original hacking.
+Left unchecked, reward hacking leads to policies that score well but behave poorly. [Recent research from Anthropic](https://www.anthropic.com/research/emergent-misalignment-reward-hacking) found that models learning to exploit reward functions also develop alignment faking and deceptive behaviors, patterns that generalize beyond the original hacking.
 
 RewardScope takes a detection-first approach. Monitor for exploitation patterns in real-time rather than trying to craft perfect rewards.
 
