@@ -39,7 +39,7 @@ RewardScope takes a detection-first approach. Monitor for exploitation patterns 
 - 🎯 **Reward Decomposition** - Track individual reward components separately
 - 🚨 **Hacking Detection** - 5 detectors for common exploitation patterns
 - 📊 **Live Dashboard** - Real-time visualization with FastAPI + Chart.js
-- 🔌 **Easy Integration** - Works with Gymnasium, Stable-Baselines3, and Isaac Lab
+- 🔌 **Easy Integration** - Works with Gymnasium, Stable-Baselines3, and Isaac Lab (coming soon)
 - 💾 **Persistent Storage** - SQLite backend for post-training analysis
 - 🎮 **CLI Tools** - Dashboard, reports, and run management
 
@@ -187,8 +187,6 @@ The live dashboard shows:
 
 Charts update in real-time via WebSocket (10Hz). Hacking score and alerts poll every 5s and 2s respectively.
 
-All charts update in real-time via WebSocket (10Hz).
-
 ## Requirements
 
 - Python 3.8+
@@ -204,7 +202,7 @@ Optional:
 ## Development
 
 ```bash
-git clone https://github.com/jimmybentley/reward-scope
+git clone https://github.com/reward-scope-ai/reward-scope
 cd reward-scope
 pip install -e ".[dev]"
 
