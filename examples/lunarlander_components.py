@@ -106,7 +106,8 @@ def main():
     
     print(f"\nData saved to: ./reward_scope_data/lunarlander_components.db")
     print("\nTo view the dashboard:")
-    print("  reward-scope dashboard --run-name lunarlander_components --data-dir ./reward_scope_data")
+    print("  reward-scope dashboard --data-dir ./reward_scope_data")
+    print("  (Select your run from the sidebar)")
 
 
 if __name__ == "__main__":
