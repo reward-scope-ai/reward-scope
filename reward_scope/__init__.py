@@ -16,6 +16,7 @@ from reward_scope.core.detectors import (
     RewardSpikingDetector,
     BoundaryExploitationDetector,
 )
+from reward_scope.core.baselines import BaselineCollector, BaselineStats
 
 __all__ = [
     "__version__",
@@ -34,4 +35,7 @@ __all__ = [
     "ComponentImbalanceDetector",
     "RewardSpikingDetector",
     "BoundaryExploitationDetector",
+    # Adaptive baselines (experimental)
+    "BaselineCollector",
+    "BaselineStats",
 ]

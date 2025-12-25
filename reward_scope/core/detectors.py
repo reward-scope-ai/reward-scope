@@ -17,6 +17,8 @@ import numpy as np
 from collections import deque
 import hashlib
 
+from .baselines import BaselineCollector
+
 
 class HackingType(Enum):
     """Types of reward hacking."""
@@ -26,6 +28,7 @@ class HackingType(Enum):
     BOUNDARY_EXPLOITATION = "boundary_exploitation"
     REWARD_SPIKING = "reward_spiking"
     COMPONENT_IMBALANCE = "component_imbalance"
+    BASELINE_DEVIATION = "baseline_deviation"
 
 
 @dataclass
@@ -619,6 +622,14 @@ class HackingDetectorSuite:
         suite = HackingDetectorSuite()
         suite.update(step, episode, obs, action, reward, components, done, info)
         alerts = suite.get_alerts()
+
+    With adaptive baselines (experimental):
+        suite = HackingDetectorSuite(
+            use_adaptive_baselines=True,
+            calibration_episodes=20,
+        )
+        # During first 20 episodes: collects baseline statistics
+        # After calibration: fires alerts when behavior deviates >3σ from baseline
     """
 
     def __init__(
@@ -630,6 +641,10 @@ class HackingDetectorSuite:
         enable_boundary_exploitation: bool = True,
         observation_bounds: Optional[Tuple[np.ndarray, np.ndarray]] = None,
         action_bounds: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+        # Adaptive baseline settings (experimental)
+        use_adaptive_baselines: bool = False,
+        calibration_episodes: int = 20,
+        baseline_sigma_threshold: float = 3.0,
     ):
         self.detectors: List[BaseDetector] = []
 
@@ -647,6 +662,17 @@ class HackingDetectorSuite:
                 action_bounds=action_bounds,
             ))
 
+        # Adaptive baselines (experimental)
+        self.use_adaptive_baselines = use_adaptive_baselines
+        self.calibration_episodes = calibration_episodes
+        self.baseline_collector: Optional[BaselineCollector] = None
+
+        if use_adaptive_baselines:
+            self.baseline_collector = BaselineCollector(
+                calibration_episodes=calibration_episodes,
+                sigma_threshold=baseline_sigma_threshold,
+            )
+
     def update(
         self,
         step: int,
@@ -660,6 +686,23 @@ class HackingDetectorSuite:
     ) -> List[HackingAlert]:
         """Run all detectors and return any alerts."""
         alerts = []
+
+        # Record step for adaptive baselines
+        if self.baseline_collector is not None:
+            self.baseline_collector.record_step(action, reward, reward_components)
+
+        # During calibration phase, suppress standard detector alerts
+        if self.use_adaptive_baselines and not self.is_calibrated:
+            # Still run detectors to keep their internal state updated,
+            # but don't return alerts during calibration
+            for detector in self.detectors:
+                detector.update(
+                    step, episode, observation, action,
+                    reward, reward_components, done, info
+                )
+            return alerts
+
+        # After calibration (or if not using adaptive baselines), run normally
         for detector in self.detectors:
             alert = detector.update(
                 step, episode, observation, action,
@@ -669,9 +712,61 @@ class HackingDetectorSuite:
                 alerts.append(alert)
         return alerts
 
+    @property
+    def is_calibrated(self) -> bool:
+        """Check if adaptive baseline calibration is complete."""
+        if self.baseline_collector is None:
+            return True  # Not using adaptive baselines
+        return self.baseline_collector.is_calibrated
+
+    @property
+    def calibration_progress(self) -> float:
+        """Get calibration progress (0.0 to 1.0)."""
+        if self.baseline_collector is None:
+            return 1.0
+        return self.baseline_collector.calibration_progress
+
     def on_episode_end(self, episode_stats: Dict) -> List[HackingAlert]:
         """Run episode-end checks."""
         alerts = []
+
+        # Handle adaptive baseline episode end
+        if self.baseline_collector is not None:
+            result = self.baseline_collector.end_episode()
+
+            # Start new episode tracking
+            self.baseline_collector.start_episode()
+
+            # Fire alerts for baseline deviations (only after calibration)
+            if result.get("deviations"):
+                for deviation in result["deviations"]:
+                    alert = HackingAlert(
+                        type=HackingType.BASELINE_DEVIATION,
+                        severity=min(1.0, abs(deviation["z_score"]) / 6.0),  # 6σ = max severity
+                        step=0,  # Episode-level alert
+                        episode=result["episode"],
+                        description=deviation["description"],
+                        evidence={
+                            "deviation_type": deviation["type"],
+                            "value": deviation["value"],
+                            "baseline_mean": deviation["baseline_mean"],
+                            "baseline_std": deviation["baseline_std"],
+                            "z_score": deviation["z_score"],
+                            "component": deviation.get("component"),
+                        },
+                        suggested_fix="Check if training dynamics have changed significantly from baseline.",
+                    )
+                    alerts.append(alert)
+                    # Store alert in a local list for get_all_alerts
+                    if not hasattr(self, '_baseline_alerts'):
+                        self._baseline_alerts: List[HackingAlert] = []
+                    self._baseline_alerts.append(alert)
+
+        # During calibration, suppress component imbalance alerts too
+        if self.use_adaptive_baselines and not self.is_calibrated:
+            return alerts  # Only return baseline-related info during calibration
+
+        # Run standard episode-end detectors
         for detector in self.detectors:
             if isinstance(detector, ComponentImbalanceDetector):
                 alert = detector.on_episode_end(episode_stats.get("component_totals", {}))
@@ -684,7 +779,10 @@ class HackingDetectorSuite:
         alerts = []
         for detector in self.detectors:
             alerts.extend(detector.alerts)
-        return sorted(alerts, key=lambda a: a.step)
+        # Include baseline deviation alerts
+        if hasattr(self, '_baseline_alerts'):
+            alerts.extend(self._baseline_alerts)
+        return sorted(alerts, key=lambda a: (a.episode, a.step))
 
     def get_hacking_score(self) -> float:
         """
@@ -713,6 +811,21 @@ class HackingDetectorSuite:
         return min(1.0, score)
 
     def reset(self) -> None:
-        """Reset all detectors."""
+        """Reset all detectors (but preserve baseline calibration)."""
         for detector in self.detectors:
             detector.reset()
+        # Note: We intentionally do NOT reset the baseline_collector here
+        # because baselines should persist across episodes
+
+    def get_baseline_summary(self) -> Optional[Dict[str, Any]]:
+        """Get summary of adaptive baseline statistics (if enabled)."""
+        if self.baseline_collector is None:
+            return None
+        return self.baseline_collector.get_baseline_summary()
+
+    def reset_baselines(self) -> None:
+        """Reset adaptive baselines (start fresh calibration)."""
+        if self.baseline_collector is not None:
+            self.baseline_collector.reset()
+        if hasattr(self, '_baseline_alerts'):
+            self._baseline_alerts.clear()

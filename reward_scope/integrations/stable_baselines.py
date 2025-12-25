@@ -57,6 +57,10 @@ class RewardScopeCallback(BaseCallback):
         enable_boundary_exploitation: bool = True,
         observation_bounds: Optional[tuple] = None,
         action_bounds: Optional[tuple] = None,
+        # Adaptive baseline settings (experimental)
+        use_adaptive_baselines: bool = False,
+        calibration_episodes: int = 20,
+        baseline_sigma_threshold: float = 3.0,
         # Dashboard settings
         start_dashboard: bool = False,
         dashboard_port: int = 8050,
@@ -74,6 +78,11 @@ class RewardScopeCallback(BaseCallback):
             enable_*: Enable/disable specific detectors
             observation_bounds: (low, high) for boundary exploitation detector
             action_bounds: (low, high) for boundary exploitation detector
+            use_adaptive_baselines: Enable adaptive baseline detection (experimental).
+                When enabled, collects baseline stats during first N episodes, then
+                fires alerts when current episode deviates >3σ from baseline.
+            calibration_episodes: Number of episodes for baseline calibration (default 20)
+            baseline_sigma_threshold: Number of std devs for deviation detection (default 3.0)
             start_dashboard: Whether to auto-start the web dashboard
             dashboard_port: Port for the dashboard server
             wandb_logging: Whether to log metrics to WandB (requires wandb.init() to be called first)
@@ -116,7 +125,13 @@ class RewardScopeCallback(BaseCallback):
             enable_boundary_exploitation=enable_boundary_exploitation,
             observation_bounds=observation_bounds,
             action_bounds=action_bounds,
+            use_adaptive_baselines=use_adaptive_baselines,
+            calibration_episodes=calibration_episodes,
+            baseline_sigma_threshold=baseline_sigma_threshold,
         )
+
+        # Track adaptive baseline settings
+        self.use_adaptive_baselines = use_adaptive_baselines
 
         # Tracking
         self.episode_count = 0
@@ -128,6 +143,8 @@ class RewardScopeCallback(BaseCallback):
         if self.verbose >= 1:
             print(f"[RewardScope] Starting data collection for run: {self.run_name}")
             print(f"[RewardScope] Storage directory: {self.storage_dir}")
+            if self.use_adaptive_baselines:
+                print(f"[RewardScope] Adaptive baselines enabled - calibrating for first {self.detector_suite.calibration_episodes} episodes")
 
         # Start dashboard if requested
         if self.start_dashboard:
@@ -295,10 +312,18 @@ class RewardScopeCallback(BaseCallback):
                 self._episode_start_step = self.step_count + 1
 
                 if self.verbose >= 1:
-                    print(f"[RewardScope] Episode {episode_data.episode} complete: "
-                          f"reward={episode_data.total_reward:.2f}, "
-                          f"length={episode_data.length}, "
-                          f"hacking_score={hacking_score:.3f}")
+                    # Show calibration progress if using adaptive baselines
+                    if self.use_adaptive_baselines and not self.detector_suite.is_calibrated:
+                        progress = self.detector_suite.calibration_progress
+                        print(f"[RewardScope] Episode {episode_data.episode} complete: "
+                              f"reward={episode_data.total_reward:.2f}, "
+                              f"length={episode_data.length} "
+                              f"(calibrating: {progress:.0%})")
+                    else:
+                        print(f"[RewardScope] Episode {episode_data.episode} complete: "
+                              f"reward={episode_data.total_reward:.2f}, "
+                              f"length={episode_data.length}, "
+                              f"hacking_score={hacking_score:.3f}")
 
             # Increment step counter
             self.step_count += 1
@@ -385,3 +410,11 @@ class RewardScopeCallback(BaseCallback):
     def get_component_stats(self) -> Dict[str, Dict[str, float]]:
         """Get statistics for each reward component."""
         return self.decomposer.get_component_stats()
+
+    def get_baseline_summary(self):
+        """Get summary of adaptive baseline statistics (if enabled)."""
+        return self.detector_suite.get_baseline_summary()
+
+    def is_calibrated(self) -> bool:
+        """Check if adaptive baseline calibration is complete."""
+        return self.detector_suite.is_calibrated

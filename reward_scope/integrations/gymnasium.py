@@ -63,6 +63,10 @@ class RewardScopeWrapper(gym.Wrapper):
         enable_component_imbalance: bool = True,
         enable_reward_spiking: bool = True,
         enable_boundary_exploitation: bool = True,
+        # Adaptive baseline settings (experimental)
+        use_adaptive_baselines: bool = False,
+        calibration_episodes: int = 20,
+        baseline_sigma_threshold: float = 3.0,
         # Dashboard settings
         start_dashboard: bool = False,
         dashboard_port: int = 8050,
@@ -79,6 +83,11 @@ class RewardScopeWrapper(gym.Wrapper):
             auto_extract_prefix: Prefix for auto-extracting reward components from info dict
             component_fns: Dict of component_name -> function(obs, action, info) -> float
             enable_*: Enable/disable specific detectors
+            use_adaptive_baselines: Enable adaptive baseline detection (experimental).
+                When enabled, collects baseline stats during first N episodes, then
+                fires alerts when current episode deviates >3σ from baseline.
+            calibration_episodes: Number of episodes for baseline calibration (default 20)
+            baseline_sigma_threshold: Number of std devs for deviation detection (default 3.0)
             start_dashboard: Whether to auto-start the web dashboard
             dashboard_port: Port for the dashboard server
             wandb_logging: Whether to log metrics to WandB (requires wandb.init() to be called first)
@@ -143,7 +152,13 @@ class RewardScopeWrapper(gym.Wrapper):
             enable_boundary_exploitation=enable_boundary_exploitation,
             observation_bounds=observation_bounds,
             action_bounds=action_bounds,
+            use_adaptive_baselines=use_adaptive_baselines,
+            calibration_episodes=calibration_episodes,
+            baseline_sigma_threshold=baseline_sigma_threshold,
         )
+
+        # Track adaptive baseline settings for logging
+        self.use_adaptive_baselines = use_adaptive_baselines
 
         # Tracking
         self.episode_count = 0
@@ -214,8 +229,17 @@ class RewardScopeWrapper(gym.Wrapper):
         info['hacking_alerts'] = []
         info['hacking_score'] = self.detector_suite.get_hacking_score()
 
+        # Add adaptive baseline info if enabled
+        if self.use_adaptive_baselines:
+            info['baseline_calibrated'] = self.detector_suite.is_calibrated
+            info['calibration_progress'] = self.detector_suite.calibration_progress
+
         if self.verbose >= 1:
-            print(f"[RewardScope] Episode {self.episode_count} started")
+            if self.use_adaptive_baselines and not self.detector_suite.is_calibrated:
+                progress = self.detector_suite.calibration_progress
+                print(f"[RewardScope] Episode {self.episode_count} started (calibrating: {progress:.0%})")
+            else:
+                print(f"[RewardScope] Episode {self.episode_count} started")
 
         return obs, info
 
@@ -295,6 +319,11 @@ class RewardScopeWrapper(gym.Wrapper):
             for a in alerts
         ]
         info['hacking_score'] = self.detector_suite.get_hacking_score()
+
+        # Add adaptive baseline info if enabled
+        if self.use_adaptive_baselines:
+            info['baseline_calibrated'] = self.detector_suite.is_calibrated
+            info['calibration_progress'] = self.detector_suite.calibration_progress
 
         # Increment counters
         self.step_count += 1
@@ -467,3 +496,11 @@ class RewardScopeWrapper(gym.Wrapper):
     def get_episode_history(self, n: int = 50):
         """Get recent episode history from collector."""
         return self.collector.get_episode_history(n=n)
+
+    def get_baseline_summary(self) -> Optional[Dict[str, Any]]:
+        """Get summary of adaptive baseline statistics (if enabled)."""
+        return self.detector_suite.get_baseline_summary()
+
+    def is_calibrated(self) -> bool:
+        """Check if adaptive baseline calibration is complete."""
+        return self.detector_suite.is_calibrated
