@@ -154,6 +154,10 @@ class BaselineTracker:
         self._length_stats = RollingStats(window_size=window)
         self._entropy_stats = RollingStats(window_size=window)
 
+        # New metrics for per-detector baseline integration
+        self._state_revisit_rate_stats = RollingStats(window_size=window)
+        self._boundary_hit_rate_stats = RollingStats(window_size=window)
+
         # Component ratio trackers (dynamic - created as needed)
         self._component_stats: Dict[str, RollingStats] = {}
 
@@ -201,6 +205,8 @@ class BaselineTracker:
                 - reward: float - total episode reward
                 - length: int - episode length in steps
                 - action_entropy: float - average action entropy
+                - state_revisit_rate: float - fraction of states that are revisits
+                - boundary_hit_rate: float - fraction of steps at bounds
                 - component_ratios: Dict[str, float] - per-component ratios
                 - detector_scores: Dict[str, float] - per-detector raw scores
         """
@@ -213,6 +219,13 @@ class BaselineTracker:
 
         if "action_entropy" in episode_stats:
             self._entropy_stats.update(episode_stats["action_entropy"])
+
+        # Update new per-detector metrics
+        if "state_revisit_rate" in episode_stats:
+            self._state_revisit_rate_stats.update(episode_stats["state_revisit_rate"])
+
+        if "boundary_hit_rate" in episode_stats:
+            self._boundary_hit_rate_stats.update(episode_stats["boundary_hit_rate"])
 
         # Update component ratio baselines
         if "component_ratios" in episode_stats:
@@ -260,6 +273,10 @@ class BaselineTracker:
             return self._length_stats.is_abnormal(value, sens)
         elif metric == "action_entropy":
             return self._entropy_stats.is_abnormal(value, sens)
+        elif metric == "state_revisit_rate":
+            return self._state_revisit_rate_stats.is_abnormal(value, sens)
+        elif metric == "boundary_hit_rate":
+            return self._boundary_hit_rate_stats.is_abnormal(value, sens)
         elif metric.startswith("component:"):
             comp_name = metric[10:]  # Remove "component:" prefix
             if comp_name in self._component_stats:
@@ -284,6 +301,10 @@ class BaselineTracker:
             return self._length_stats.get_z_score(value)
         elif metric == "action_entropy":
             return self._entropy_stats.get_z_score(value)
+        elif metric == "state_revisit_rate":
+            return self._state_revisit_rate_stats.get_z_score(value)
+        elif metric == "boundary_hit_rate":
+            return self._boundary_hit_rate_stats.get_z_score(value)
         elif metric.startswith("component:"):
             comp_name = metric[10:]
             if comp_name in self._component_stats:
@@ -322,6 +343,10 @@ class BaselineTracker:
             summary["metrics"]["length"] = self._length_stats.get_stats()
         if self._entropy_stats.count > 0:
             summary["metrics"]["action_entropy"] = self._entropy_stats.get_stats()
+        if self._state_revisit_rate_stats.count > 0:
+            summary["metrics"]["state_revisit_rate"] = self._state_revisit_rate_stats.get_stats()
+        if self._boundary_hit_rate_stats.count > 0:
+            summary["metrics"]["boundary_hit_rate"] = self._boundary_hit_rate_stats.get_stats()
 
         # Add component metrics
         for comp_name, stats in self._component_stats.items():
@@ -340,6 +365,8 @@ class BaselineTracker:
         self._reward_stats = RollingStats(window_size=self.window)
         self._length_stats = RollingStats(window_size=self.window)
         self._entropy_stats = RollingStats(window_size=self.window)
+        self._state_revisit_rate_stats = RollingStats(window_size=self.window)
+        self._boundary_hit_rate_stats = RollingStats(window_size=self.window)
         self._component_stats.clear()
         self._detector_stats.clear()
         self._episodes_seen = 0

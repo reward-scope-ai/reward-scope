@@ -50,6 +50,9 @@ class HackingAlert:
 class BaseDetector:
     """Base class for hacking detectors."""
 
+    # Each detector should define its baseline metric name
+    baseline_metric: Optional[str] = None
+
     def __init__(self, window_size: int = 100):
         self.window_size = window_size
         self.alerts: List[HackingAlert] = []
@@ -64,16 +67,72 @@ class BaseDetector:
         reward_components: Dict[str, float],
         done: bool,
         info: Dict[str, Any],
+        baseline_tracker: Optional[BaselineTracker] = None,
     ) -> Optional[HackingAlert]:
         """
         Process a new step and check for hacking.
         Returns alert if hacking detected, None otherwise.
+
+        Args:
+            baseline_tracker: Optional BaselineTracker for two-layer detection.
+                If provided and active, detector uses two-layer logic to classify
+                alerts as ALERT (confirmed), SUPPRESSED (false positive), or
+                WARNING (baseline abnormal but no static alert).
         """
         raise NotImplementedError
+
+    def _apply_two_layer_logic(
+        self,
+        alert: HackingAlert,
+        metric_value: float,
+        baseline_tracker: Optional[BaselineTracker],
+    ) -> Optional[HackingAlert]:
+        """
+        Apply two-layer detection logic to an alert.
+
+        Args:
+            alert: The alert from static detection
+            metric_value: The metric value to check against baseline
+            baseline_tracker: The baseline tracker
+
+        Returns:
+            Modified alert (ALERT, SUPPRESSED), or None if should be suppressed
+        """
+        if baseline_tracker is None or not baseline_tracker.is_active:
+            # No baseline active, return alert as-is
+            return alert
+
+        if self.baseline_metric is None:
+            # Detector doesn't have a baseline metric, return as-is
+            return alert
+
+        # Check if baseline considers this abnormal
+        baseline_abnormal = baseline_tracker.is_abnormal(self.baseline_metric, metric_value)
+        z_score = baseline_tracker.get_z_score(self.baseline_metric, metric_value)
+        severity = classify_alert(True, baseline_abnormal)
+
+        # Update alert with two-layer info
+        alert.alert_severity = severity
+        alert.baseline_z_score = z_score
+
+        if severity == AlertSeverity.SUPPRESSED:
+            # Track suppression but don't add to alerts list
+            baseline_tracker.record_suppressed()
+            return None  # Suppress the alert
+
+        return alert
 
     def reset(self) -> None:
         """Reset detector state (e.g., at episode end)."""
         pass
+
+    def get_episode_metric(self) -> Optional[float]:
+        """Get the episode-level metric value for baseline tracking.
+
+        Subclasses should override this to provide their specific metric
+        (e.g., state_revisit_rate for StateCyclingDetector).
+        """
+        return None
 
 
 class StateCyclingDetector(BaseDetector):
@@ -89,6 +148,8 @@ class StateCyclingDetector(BaseDetector):
     velocity reward outweighs forward progress reward.
     """
 
+    baseline_metric = "state_revisit_rate"
+
     def __init__(
         self,
         window_size: int = 100,
@@ -103,8 +164,13 @@ class StateCyclingDetector(BaseDetector):
         self.observation_buffer: deque = deque(maxlen=window_size)
         self.last_alert_step = -1000  # Avoid spamming alerts
 
+        # Track state revisit rate for baseline
+        self._unique_states: set = set()
+        self._total_states: int = 0
+
     def update(self, step, episode, observation, action, reward,
-               reward_components, done, info) -> Optional[HackingAlert]:
+               reward_components, done, info,
+               baseline_tracker: Optional[BaselineTracker] = None) -> Optional[HackingAlert]:
         """
         Check for state cycling.
 
@@ -116,6 +182,10 @@ class StateCyclingDetector(BaseDetector):
         # Add observation to buffer
         obs_hash = self._compute_observation_hash(observation)
         self.observation_buffer.append(obs_hash)
+
+        # Track state revisit rate
+        self._total_states += 1
+        self._unique_states.add(obs_hash)
 
         # Need enough data to detect cycles
         if len(self.observation_buffer) < 2 * self.min_cycle_length:
@@ -145,15 +215,28 @@ class StateCyclingDetector(BaseDetector):
                         "cycle_length": cycle_length,
                         "similarity": similarity,
                         "recent_reward": reward,
+                        "state_revisit_rate": self.get_episode_metric(),
                     },
                     suggested_fix="Check if reward encourages staying in a loop. Add diversity bonus or forward progress reward.",
                 )
 
-                self.alerts.append(alert)
-                self.last_alert_step = step
+                # Apply two-layer logic if baseline is available
+                alert = self._apply_two_layer_logic(
+                    alert, self.get_episode_metric() or 0.0, baseline_tracker
+                )
+                if alert is not None:
+                    self.alerts.append(alert)
+                    self.last_alert_step = step
                 return alert
 
         return None
+
+    def get_episode_metric(self) -> Optional[float]:
+        """Get state revisit rate (1 - unique/total)."""
+        if self._total_states == 0:
+            return None
+        # Revisit rate: 0 = all unique, 1 = all same
+        return 1.0 - (len(self._unique_states) / self._total_states)
 
     def _compute_observation_hash(self, obs: Any) -> str:
         """Create hashable representation of observation."""
@@ -200,6 +283,8 @@ class StateCyclingDetector(BaseDetector):
     def reset(self) -> None:
         """Reset detector state at episode end."""
         self.observation_buffer.clear()
+        self._unique_states.clear()
+        self._total_states = 0
 
 
 class ActionRepetitionDetector(BaseDetector):
@@ -215,6 +300,8 @@ class ActionRepetitionDetector(BaseDetector):
     reward doesn't penalize lack of directional control.
     """
 
+    baseline_metric = "action_entropy"
+
     def __init__(
         self,
         window_size: int = 50,
@@ -227,11 +314,19 @@ class ActionRepetitionDetector(BaseDetector):
         self.action_buffer: deque = deque(maxlen=window_size)
         self.last_alert_step = -1000
 
+        # Track action counts for entropy calculation
+        self._episode_action_counts: Dict[str, int] = {}
+
     def update(self, step, episode, observation, action, reward,
-               reward_components, done, info) -> Optional[HackingAlert]:
+               reward_components, done, info,
+               baseline_tracker: Optional[BaselineTracker] = None) -> Optional[HackingAlert]:
         # Convert action to hashable type
         action_hash = self._hash_action(action)
         self.action_buffer.append(action_hash)
+
+        # Track action for entropy calculation
+        self._episode_action_counts[action_hash] = \
+            self._episode_action_counts.get(action_hash, 0) + 1
 
         # Need enough data
         if len(self.action_buffer) < self.window_size:
@@ -249,6 +344,7 @@ class ActionRepetitionDetector(BaseDetector):
 
         if repetition_rate >= self.repetition_threshold:
             severity = min(1.0, repetition_rate)
+            entropy = self.get_episode_metric() or 0.0
 
             alert = HackingAlert(
                 type=HackingType.ACTION_REPETITION,
@@ -260,15 +356,31 @@ class ActionRepetitionDetector(BaseDetector):
                     "repetition_rate": repetition_rate,
                     "most_common_action": str(most_common_action),
                     "window_size": len(self.action_buffer),
+                    "action_entropy": entropy,
                 },
                 suggested_fix="Add action diversity bonus or entropy regularization to policy.",
             )
 
-            self.alerts.append(alert)
-            self.last_alert_step = step
+            # Apply two-layer logic if baseline is available
+            # Note: Low entropy is abnormal, so we check with the entropy value
+            alert = self._apply_two_layer_logic(alert, entropy, baseline_tracker)
+            if alert is not None:
+                self.alerts.append(alert)
+                self.last_alert_step = step
             return alert
 
         return None
+
+    def get_episode_metric(self) -> Optional[float]:
+        """Get action entropy for the episode."""
+        if not self._episode_action_counts:
+            return None
+        total = sum(self._episode_action_counts.values())
+        if total == 0:
+            return None
+        probs = np.array(list(self._episode_action_counts.values())) / total
+        entropy = -np.sum(probs * np.log(probs + 1e-10))
+        return float(entropy)
 
     def _hash_action(self, action: Any) -> str:
         """Convert action to hashable string."""
@@ -285,6 +397,7 @@ class ActionRepetitionDetector(BaseDetector):
     def reset(self) -> None:
         """Reset at episode end."""
         self.action_buffer.clear()
+        self._episode_action_counts.clear()
 
 
 class ComponentImbalanceDetector(BaseDetector):
@@ -300,6 +413,9 @@ class ComponentImbalanceDetector(BaseDetector):
     while ignoring energy efficiency and stability rewards.
     """
 
+    # Component imbalance uses component-specific baselines
+    baseline_metric = None  # Set dynamically per component
+
     def __init__(
         self,
         window_size: int = 100,
@@ -311,9 +427,12 @@ class ComponentImbalanceDetector(BaseDetector):
         self.imbalance_episodes = imbalance_episodes
         self.episode_component_ratios: deque = deque(maxlen=imbalance_episodes)
         self.current_episode_components: Dict[str, float] = {}
+        self._last_dominance_ratio: float = 0.0
+        self._last_dominant_component: str = ""
 
     def update(self, step, episode, observation, action, reward,
-               reward_components, done, info) -> Optional[HackingAlert]:
+               reward_components, done, info,
+               baseline_tracker: Optional[BaselineTracker] = None) -> Optional[HackingAlert]:
         # Accumulate components for current episode
         for comp_name, comp_value in reward_components.items():
             if comp_name == "residual":
@@ -324,7 +443,11 @@ class ComponentImbalanceDetector(BaseDetector):
 
         return None  # Check at episode end
 
-    def on_episode_end(self, episode_component_totals: Dict[str, float]) -> Optional[HackingAlert]:
+    def on_episode_end(
+        self,
+        episode_component_totals: Dict[str, float],
+        baseline_tracker: Optional[BaselineTracker] = None,
+    ) -> Optional[HackingAlert]:
         """Check for sustained imbalance across episodes."""
         if not episode_component_totals:
             return None
@@ -343,6 +466,10 @@ class ComponentImbalanceDetector(BaseDetector):
         dominant_component = max(totals.items(), key=lambda x: x[1])
         dominant_name, dominant_value = dominant_component
         dominance_ratio = dominant_value / total_abs
+
+        # Store for episode metric
+        self._last_dominance_ratio = dominance_ratio
+        self._last_dominant_component = dominant_name
 
         # Store ratio for this episode
         self.episode_component_ratios.append({
@@ -379,12 +506,32 @@ class ComponentImbalanceDetector(BaseDetector):
                     suggested_fix=f"Rebalance component weights or add constraints on '{most_common}'.",
                 )
 
+                # Apply two-layer logic using component-specific baseline
+                if baseline_tracker is not None and baseline_tracker.is_active:
+                    metric_name = f"component:{most_common}"
+                    baseline_abnormal = baseline_tracker.is_abnormal(metric_name, avg_ratio)
+                    z_score = baseline_tracker.get_z_score(metric_name, avg_ratio)
+                    severity_class = classify_alert(True, baseline_abnormal)
+
+                    alert.alert_severity = severity_class
+                    alert.baseline_z_score = z_score
+
+                    if severity_class == AlertSeverity.SUPPRESSED:
+                        baseline_tracker.record_suppressed()
+                        self.current_episode_components.clear()
+                        return None  # Suppress
+
                 self.alerts.append(alert)
+                self.current_episode_components.clear()
                 return alert
 
         # Reset for next episode
         self.current_episode_components.clear()
         return None
+
+    def get_episode_metric(self) -> Optional[float]:
+        """Get the dominance ratio of the most dominant component."""
+        return self._last_dominance_ratio if self._last_dominance_ratio > 0 else None
 
     def reset(self) -> None:
         """Reset episode accumulator."""
@@ -403,6 +550,8 @@ class RewardSpikingDetector(BaseDetector):
     Example: Agent finds glitch state that gives massive reward.
     """
 
+    baseline_metric = "reward"
+
     def __init__(
         self,
         window_size: int = 500,
@@ -418,9 +567,14 @@ class RewardSpikingDetector(BaseDetector):
         self.count: int = 0
         self.last_alert_step = -1000
 
+        # Track episode reward for baseline
+        self._episode_reward: float = 0.0
+
     def update(self, step, episode, observation, action, reward,
-               reward_components, done, info) -> Optional[HackingAlert]:
+               reward_components, done, info,
+               baseline_tracker: Optional[BaselineTracker] = None) -> Optional[HackingAlert]:
         self.reward_buffer.append(reward)
+        self._episode_reward += reward
 
         # Update running statistics (Welford's algorithm)
         self.count += 1
@@ -465,15 +619,23 @@ class RewardSpikingDetector(BaseDetector):
                 suggested_fix="Check for reward clipping or investigate state that caused spike.",
             )
 
-            self.alerts.append(alert)
-            self.last_alert_step = step
+            # Apply two-layer logic - use the reward value against baseline
+            alert = self._apply_two_layer_logic(alert, reward, baseline_tracker)
+            if alert is not None:
+                self.alerts.append(alert)
+                self.last_alert_step = step
             return alert
 
         return None
 
+    def get_episode_metric(self) -> Optional[float]:
+        """Get the total episode reward."""
+        return self._episode_reward
+
     def reset(self) -> None:
         """Reset at episode end (but keep buffer for cross-episode detection)."""
-        pass  # Don't clear buffer - we want to detect spikes across episodes
+        self._episode_reward = 0.0
+        # Don't clear buffer - we want to detect spikes across episodes
 
 
 class BoundaryExploitationDetector(BaseDetector):
@@ -487,6 +649,8 @@ class BoundaryExploitationDetector(BaseDetector):
 
     Example: Agent pushes joint to limit where physics breaks down.
     """
+
+    baseline_metric = "boundary_hit_rate"
 
     def __init__(
         self,
@@ -505,19 +669,33 @@ class BoundaryExploitationDetector(BaseDetector):
         self.total_steps = 0
         self.last_alert_step = -1000
 
+        # Track episode boundary hit rate
+        self._episode_boundary_hits: int = 0
+        self._episode_steps: int = 0
+
     def update(self, step, episode, observation, action, reward,
-               reward_components, done, info) -> Optional[HackingAlert]:
+               reward_components, done, info,
+               baseline_tracker: Optional[BaselineTracker] = None) -> Optional[HackingAlert]:
         self.total_steps += 1
+        self._episode_steps += 1
 
         # Check observation boundaries
+        at_obs_boundary = False
         if self.observation_bounds is not None and observation is not None:
-            if self._is_at_boundary(observation, self.observation_bounds):
+            at_obs_boundary = self._is_at_boundary(observation, self.observation_bounds)
+            if at_obs_boundary:
                 self.boundary_counts["obs"] += 1
 
         # Check action boundaries
+        at_action_boundary = False
         if self.action_bounds is not None and action is not None:
-            if self._is_at_boundary(action, self.action_bounds):
+            at_action_boundary = self._is_at_boundary(action, self.action_bounds)
+            if at_action_boundary:
                 self.boundary_counts["action"] += 1
+
+        # Track for episode metric
+        if at_obs_boundary or at_action_boundary:
+            self._episode_boundary_hits += 1
 
         # Need enough data
         if self.total_steps < self.window_size:
@@ -548,18 +726,28 @@ class BoundaryExploitationDetector(BaseDetector):
                     "observation_boundary_freq": obs_freq,
                     "action_boundary_freq": action_freq,
                     "window_size": window_steps,
+                    "boundary_hit_rate": self.get_episode_metric(),
                 },
                 suggested_fix="Add penalty for boundary proximity or check if bounds are too restrictive.",
             )
 
-            self.alerts.append(alert)
-            self.last_alert_step = step
-            # Reset counts to avoid repeated alerts for same behavior
-            self.boundary_counts = {"obs": 0, "action": 0}
-            self.total_steps = 0
+            # Apply two-layer logic
+            alert = self._apply_two_layer_logic(alert, max_freq, baseline_tracker)
+            if alert is not None:
+                self.alerts.append(alert)
+                self.last_alert_step = step
+                # Reset counts to avoid repeated alerts for same behavior
+                self.boundary_counts = {"obs": 0, "action": 0}
+                self.total_steps = 0
             return alert
 
         return None
+
+    def get_episode_metric(self) -> Optional[float]:
+        """Get the boundary hit rate for the episode."""
+        if self._episode_steps == 0:
+            return None
+        return self._episode_boundary_hits / self._episode_steps
 
     def _is_at_boundary(self, value: Any, bounds: Tuple) -> bool:
         """Check if value is at boundary."""
@@ -614,8 +802,10 @@ class BoundaryExploitationDetector(BaseDetector):
 
     def reset(self) -> None:
         """Reset at episode end."""
+        # Reset episode tracking
+        self._episode_boundary_hits = 0
+        self._episode_steps = 0
         # Keep boundary counts across episodes to detect sustained exploitation
-        pass
 
 
 class HackingDetectorSuite:
@@ -760,11 +950,12 @@ class HackingDetectorSuite:
                 )
             return alerts
 
-        # Run all detectors
+        # Run all detectors - pass baseline_tracker for two-layer logic
         for detector in self.detectors:
             alert = detector.update(
                 step, episode, observation, action,
-                reward, reward_components, done, info
+                reward, reward_components, done, info,
+                baseline_tracker=self.baseline_tracker,
             )
             if alert:
                 alerts.append(alert)
@@ -826,20 +1017,39 @@ class HackingDetectorSuite:
         action_entropy = self._compute_action_entropy()
         component_ratios = self._compute_component_ratios()
 
+        # Collect detector-specific episode metrics
+        state_revisit_rate = None
+        boundary_hit_rate = None
+        for detector in self.detectors:
+            if isinstance(detector, StateCyclingDetector):
+                state_revisit_rate = detector.get_episode_metric()
+            elif isinstance(detector, BoundaryExploitationDetector):
+                boundary_hit_rate = detector.get_episode_metric()
+
         # Update baseline tracker with episode stats (Phase 2)
         if self.baseline_tracker is not None:
-            self.baseline_tracker.update({
+            baseline_update = {
                 "reward": self._current_episode_reward,
                 "length": self._current_episode_length,
                 "action_entropy": action_entropy,
                 "component_ratios": component_ratios,
-            })
+            }
+            # Only add if we have values
+            if state_revisit_rate is not None:
+                baseline_update["state_revisit_rate"] = state_revisit_rate
+            if boundary_hit_rate is not None:
+                baseline_update["boundary_hit_rate"] = boundary_hit_rate
+
+            self.baseline_tracker.update(baseline_update)
 
         # Run standard episode-end detectors first
         static_alerts = []
         for detector in self.detectors:
             if isinstance(detector, ComponentImbalanceDetector):
-                alert = detector.on_episode_end(episode_stats.get("component_totals", {}))
+                alert = detector.on_episode_end(
+                    episode_stats.get("component_totals", {}),
+                    baseline_tracker=self.baseline_tracker,
+                )
                 if alert:
                     static_alerts.append(alert)
 
