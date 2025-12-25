@@ -488,6 +488,19 @@ class RewardScopeWrapper(gym.Wrapper):
                 "rewardscope/alerts_count": len(alerts),
             }
 
+            # Log adaptive baseline metrics
+            if self.adaptive_baseline:
+                metrics["rewardscope/alerts_suppressed"] = self.detector_suite.get_suppressed_count()
+                metrics["rewardscope/alerts_warnings"] = self.detector_suite.get_warning_count()
+                metrics["rewardscope/baseline_active"] = self.detector_suite.baseline_is_active
+
+                # Compute max confidence from alerts
+                max_confidence = 0.0
+                for alert in alerts:
+                    if alert.confidence is not None and alert.confidence > max_confidence:
+                        max_confidence = alert.confidence
+                metrics["rewardscope/alert_max_confidence"] = max_confidence
+
             # Log component totals
             if episode_data.component_totals:
                 for comp_name, comp_total in episode_data.component_totals.items():
