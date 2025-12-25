@@ -38,6 +38,9 @@ setup(
         "sb3": [
             "stable-baselines3>=2.0.0",
         ],
+        "wandb": [
+            "wandb>=0.15.0",
+        ],
         "dev": [
             "pytest>=7.0.0",
             "black>=23.0.0",
@@ -45,6 +48,7 @@ setup(
         ],
         "all": [
             "stable-baselines3>=2.0.0",
+            "wandb>=0.15.0",
             "pytest>=7.0.0",
             "black>=23.0.0",
             "ruff>=0.0.280",

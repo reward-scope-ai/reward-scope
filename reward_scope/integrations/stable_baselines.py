@@ -60,6 +60,8 @@ class RewardScopeCallback(BaseCallback):
         # Dashboard settings
         start_dashboard: bool = False,
         dashboard_port: int = 8050,
+        # WandB settings
+        wandb_logging: bool = False,
         # Other settings
         verbose: int = 1,
     ):
@@ -74,6 +76,7 @@ class RewardScopeCallback(BaseCallback):
             action_bounds: (low, high) for boundary exploitation detector
             start_dashboard: Whether to auto-start the web dashboard
             dashboard_port: Port for the dashboard server
+            wandb_logging: Whether to log metrics to WandB (requires wandb.init() to be called first)
             verbose: Verbosity level (0=silent, 1=info, 2=debug)
         """
         super().__init__(verbose=verbose)
@@ -82,6 +85,7 @@ class RewardScopeCallback(BaseCallback):
         self.storage_dir = storage_dir
         self.start_dashboard = start_dashboard
         self.dashboard_port = dashboard_port
+        self.wandb_logging = wandb_logging
 
         # Dashboard process
         self._dashboard_process = None
@@ -270,6 +274,7 @@ class RewardScopeCallback(BaseCallback):
                 # Get hacking score and flags from detector suite
                 hacking_score = self.detector_suite.get_hacking_score()
                 hacking_flags = [alert.type.value for alert in self.detector_suite.get_all_alerts()]
+                all_alerts = self.detector_suite.get_all_alerts()
 
                 # Update database with computed hacking data
                 self.collector.update_episode_hacking_data(
@@ -277,6 +282,10 @@ class RewardScopeCallback(BaseCallback):
                     hacking_score=hacking_score,
                     hacking_flags=hacking_flags,
                 )
+
+                # Log to WandB if enabled
+                if self.wandb_logging:
+                    self._log_to_wandb(episode_data, hacking_score, all_alerts)
 
                 # Reset detectors for next episode
                 self.detector_suite.reset()
@@ -295,6 +304,49 @@ class RewardScopeCallback(BaseCallback):
             self.step_count += 1
 
         return True  # Continue training
+
+    def _log_to_wandb(self, episode_data, hacking_score: float, alerts: list) -> None:
+        """Log episode metrics to WandB if available."""
+        try:
+            import wandb
+
+            # Check if wandb is initialized
+            if wandb.run is None:
+                if self.verbose >= 1:
+                    print("[RewardScope] Warning: wandb_logging enabled but wandb.init() not called")
+                return
+
+            # Prepare metrics dict
+            metrics = {
+                "rewardscope/hacking_score": hacking_score,
+                "rewardscope/episode_reward": episode_data.total_reward,
+                "rewardscope/episode_length": episode_data.length,
+                "rewardscope/alerts_count": len(alerts),
+            }
+
+            # Log component totals
+            if episode_data.component_totals:
+                for comp_name, comp_total in episode_data.component_totals.items():
+                    metrics[f"rewardscope/component/{comp_name}"] = comp_total
+
+            # Log metrics
+            wandb.log(metrics)
+
+            # Log high severity alerts as wandb warnings
+            for alert in alerts:
+                if alert.severity > 0.7:
+                    wandb.alert(
+                        title=f"RewardScope Alert: {alert.type.value}",
+                        text=f"{alert.description}\nSeverity: {alert.severity:.2f}\nSuggested fix: {alert.suggested_fix}",
+                        level=wandb.AlertLevel.WARN,
+                    )
+
+        except ImportError:
+            if self.verbose >= 1:
+                print("[RewardScope] Warning: wandb_logging enabled but wandb not installed")
+        except Exception as e:
+            if self.verbose >= 1:
+                print(f"[RewardScope] Warning: Failed to log to wandb: {e}")
 
     def _on_training_end(self) -> None:
         """Called when training ends."""

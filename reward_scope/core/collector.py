@@ -260,11 +260,11 @@ class DataCollector:
             hacking_flags=[],
         )
 
-        # Store episode data
+        # Store episode data (use REPLACE to handle re-runs with same run_name)
         cursor = self.conn.cursor()
         cursor.execute(
             """
-            INSERT INTO episodes (
+            INSERT OR REPLACE INTO episodes (
                 episode, total_reward, length, start_time, end_time,
                 component_totals, hacking_score, hacking_flags
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
