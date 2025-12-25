@@ -41,6 +41,7 @@ RewardScope takes a detection-first approach. Monitor for exploitation patterns 
 - 📊 **Live Dashboard** - Real-time visualization with FastAPI + Chart.js
 - 🔌 **Easy Integration** - Works with Gymnasium, Stable-Baselines3, and Isaac Lab (coming soon)
 - 💾 **Persistent Storage** - SQLite backend for post-training analysis
+- 📈 **WandB Integration** - Optional logging to Weights & Biases
 - 🎮 **CLI Tools** - Dashboard, reports, and run management
 
 ## Quick Start
@@ -98,6 +99,39 @@ model.learn(total_timesteps=50000, callback=callback)
 ```
 
 The dashboard starts automatically at http://localhost:8050.
+
+### With WandB
+
+Log RewardScope metrics to your existing WandB setup:
+
+```python
+import wandb
+from stable_baselines3 import PPO
+from reward_scope.integrations import RewardScopeCallback
+
+# Initialize WandB first
+wandb.init(project="my-rl-project", name="ppo_experiment")
+
+# Enable WandB logging in RewardScope
+callback = RewardScopeCallback(
+    run_name="ppo_experiment",
+    wandb_logging=True,  # Log to WandB!
+)
+
+model = PPO("MlpPolicy", env)
+model.learn(total_timesteps=50000, callback=callback)
+```
+
+RewardScope will log these metrics per episode:
+- `rewardscope/hacking_score` - Overall hacking score (0-1)
+- `rewardscope/episode_reward` - Total episode reward
+- `rewardscope/episode_length` - Steps in episode
+- `rewardscope/component/{name}` - Each reward component total
+- `rewardscope/alerts_count` - Number of alerts
+
+High severity alerts (>0.7) are also logged as WandB warnings.
+
+**Note:** Install wandb separately: `pip install reward-scope[wandb]`
 
 ## What RewardScope Detects
 
@@ -160,6 +194,7 @@ env = RewardScopeWrapper(
 Check out the [examples/](examples/) directory:
 
 - `cartpole_basic.py` - Simplest example to verify installation
+- `cartpole_wandb.py` - WandB integration example
 - `lunarlander_components.py` - Multi-component reward tracking
 - `mujoco_ant.py` - Complex reward with Stable-Baselines3
 
@@ -199,6 +234,7 @@ Charts update in real-time via WebSocket (10Hz). Hacking score and alerts poll e
 
 Optional:
 - stable-baselines3 (for SB3 integration)
+- wandb (for WandB logging)
 - mujoco (for MuJoCo environments)
 
 ## Development

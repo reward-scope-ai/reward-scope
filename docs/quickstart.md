@@ -70,6 +70,63 @@ model.learn(total_timesteps=50000, callback=callback)
 
 The dashboard starts automatically at http://localhost:8050.
 
+## With WandB
+
+Log RewardScope metrics to Weights & Biases:
+
+```python
+import wandb
+from stable_baselines3 import PPO
+from reward_scope.integrations import RewardScopeCallback
+
+# Initialize WandB first
+wandb.init(project="my-rl-project", name="ppo_experiment")
+
+# Enable WandB logging in RewardScope
+callback = RewardScopeCallback(
+    run_name="ppo_experiment",
+    wandb_logging=True,  # Log to WandB!
+    verbose=1
+)
+
+model = PPO("MlpPolicy", env)
+model.learn(total_timesteps=50000, callback=callback)
+```
+
+WandB integration also works with the Gymnasium wrapper:
+
+```python
+import wandb
+import gymnasium as gym
+from reward_scope.integrations import RewardScopeWrapper
+
+wandb.init(project="my-rl-project", name="my_experiment")
+
+env = gym.make("CartPole-v1")
+env = RewardScopeWrapper(
+    env,
+    run_name="my_experiment",
+    wandb_logging=True,  # Log to WandB!
+    verbose=1
+)
+
+# Train as usual...
+```
+
+**Metrics logged per episode:**
+- `rewardscope/hacking_score` - Overall hacking score (0-1)
+- `rewardscope/episode_reward` - Total episode reward
+- `rewardscope/episode_length` - Steps in episode
+- `rewardscope/component/{name}` - Each reward component total
+- `rewardscope/alerts_count` - Number of alerts
+
+High severity alerts (>0.7) are logged as WandB warnings.
+
+**Installation:**
+```bash
+pip install reward-scope[wandb]
+```
+
 ## Tracking Reward Components
 
 ```python
