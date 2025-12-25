@@ -18,7 +18,7 @@ from collections import deque
 import hashlib
 
 from .baselines import BaselineCollector
-from .baseline import BaselineTracker, AlertSeverity, classify_alert
+from .baseline import BaselineTracker, AlertSeverity, classify_alert, zscore_to_confidence
 
 
 class HackingType(Enum):
@@ -45,6 +45,7 @@ class HackingAlert:
     # Two-layer detection fields
     alert_severity: AlertSeverity = field(default=AlertSeverity.ALERT)
     baseline_z_score: Optional[float] = None  # z-score against baseline if available
+    confidence: Optional[float] = None  # 0.0 to 1.0, based on z-score deviation
 
 
 class BaseDetector:
@@ -114,6 +115,7 @@ class BaseDetector:
         # Update alert with two-layer info
         alert.alert_severity = severity
         alert.baseline_z_score = z_score
+        alert.confidence = zscore_to_confidence(z_score)
 
         if severity == AlertSeverity.SUPPRESSED:
             # Track suppression but don't add to alerts list
@@ -852,6 +854,10 @@ class HackingDetectorSuite:
         baseline_window: int = 50,
         baseline_warmup: int = 20,
         baseline_sensitivity: float = 2.0,
+        # Auto-calibration settings (Phase 5)
+        min_warmup_episodes: int = 10,
+        max_warmup_episodes: int = 50,
+        stability_threshold: float = 0.1,
         # Legacy adaptive baseline settings (Phase 1 - experimental)
         use_adaptive_baselines: bool = False,
         calibration_episodes: int = 20,
@@ -882,6 +888,9 @@ class HackingDetectorSuite:
                 window=baseline_window,
                 warmup=baseline_warmup,
                 sensitivity=baseline_sensitivity,
+                min_warmup_episodes=min_warmup_episodes,
+                max_warmup_episodes=max_warmup_episodes,
+                stability_threshold=stability_threshold,
             )
 
         # Legacy adaptive baselines (Phase 1 - experimental)
@@ -1167,6 +1176,7 @@ class HackingDetectorSuite:
                 )
                 if not has_static:
                     z_score = self.baseline_tracker.get_z_score(metric_name, value)
+                    confidence = zscore_to_confidence(z_score)
                     warning = HackingAlert(
                         type=HackingType.BASELINE_DEVIATION,
                         severity=min(0.5, abs(z_score) / 6.0),  # Lower severity for warnings
@@ -1177,6 +1187,7 @@ class HackingDetectorSuite:
                             "metric": metric_name,
                             "value": value,
                             "z_score": z_score,
+                            "confidence": confidence,
                             "baseline_mean": self.baseline_tracker._reward_stats.mean if metric_name == "reward"
                                 else self.baseline_tracker._length_stats.mean if metric_name == "length"
                                 else self.baseline_tracker._entropy_stats.mean,
@@ -1184,6 +1195,7 @@ class HackingDetectorSuite:
                         suggested_fix="Monitor for consistent deviation from baseline.",
                         alert_severity=AlertSeverity.WARNING,
                         baseline_z_score=z_score,
+                        confidence=confidence,
                     )
                     alerts.append(warning)
                     self._warning_alerts.append(warning)

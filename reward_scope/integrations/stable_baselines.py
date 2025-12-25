@@ -62,6 +62,10 @@ class RewardScopeCallback(BaseCallback):
         baseline_window: int = 50,
         baseline_warmup: int = 20,
         baseline_sensitivity: float = 2.0,
+        # Auto-calibration settings (Phase 5)
+        min_warmup_episodes: int = 10,
+        max_warmup_episodes: int = 50,
+        stability_threshold: float = 0.1,
         # Legacy adaptive baseline settings (Phase 1 - experimental)
         use_adaptive_baselines: bool = False,
         calibration_episodes: int = 20,
@@ -89,6 +93,9 @@ class RewardScopeCallback(BaseCallback):
             baseline_window: Rolling window size for baseline statistics (default 50 episodes)
             baseline_warmup: Episodes before baseline layer activates (default 20)
             baseline_sensitivity: Std devs threshold for "abnormal" (default 2.0)
+            min_warmup_episodes: Minimum warmup before auto-calibration can end (default 10)
+            max_warmup_episodes: Maximum warmup - activate anyway after this (default 50)
+            stability_threshold: Normalized variance threshold for stability (default 0.1)
             use_adaptive_baselines: Legacy Phase 1 adaptive baselines (experimental)
             calibration_episodes: Legacy calibration episodes (default 20)
             baseline_sigma_threshold: Legacy deviation threshold (default 3.0)
@@ -139,6 +146,10 @@ class RewardScopeCallback(BaseCallback):
             baseline_window=baseline_window,
             baseline_warmup=baseline_warmup,
             baseline_sensitivity=baseline_sensitivity,
+            # Auto-calibration (Phase 5)
+            min_warmup_episodes=min_warmup_episodes,
+            max_warmup_episodes=max_warmup_episodes,
+            stability_threshold=stability_threshold,
             # Legacy Phase 1
             use_adaptive_baselines=use_adaptive_baselines,
             calibration_episodes=calibration_episodes,
@@ -285,11 +296,12 @@ class RewardScopeCallback(BaseCallback):
                 info=info,
             )
 
-            # Print alerts if any (with alert severity)
+            # Print alerts if any (with alert severity and confidence)
             if alerts and self.verbose >= 1:
                 for alert in alerts:
                     severity_label = alert.alert_severity.value.upper()
-                    print(f"[RewardScope] {severity_label}: {alert.type.value}: {alert.description}")
+                    confidence_str = f" (confidence={alert.confidence:.2f})" if alert.confidence is not None else ""
+                    print(f"[RewardScope] {severity_label}{confidence_str}: {alert.type.value}: {alert.description}")
                     if self.verbose >= 2:
                         print(f"  Evidence: {alert.evidence}")
                         print(f"  Fix: {alert.suggested_fix}")
@@ -309,7 +321,8 @@ class RewardScopeCallback(BaseCallback):
                 if episode_alerts and self.verbose >= 1:
                     for alert in episode_alerts:
                         severity_label = alert.alert_severity.value.upper()
-                        print(f"[RewardScope] {severity_label} Episode {self.episode_count}: {alert.type.value}: {alert.description}")
+                        confidence_str = f" (confidence={alert.confidence:.2f})" if alert.confidence is not None else ""
+                        print(f"[RewardScope] {severity_label}{confidence_str} Episode {self.episode_count}: {alert.type.value}: {alert.description}")
 
                 # Get hacking score and flags from detector suite
                 hacking_score = self.detector_suite.get_hacking_score()

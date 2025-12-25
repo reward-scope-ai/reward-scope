@@ -30,6 +30,38 @@ class AlertSeverity(Enum):
     SUPPRESSED = "suppressed" # Static fired but baseline says normal
 
 
+def zscore_to_confidence(z_score: float) -> float:
+    """
+    Convert a z-score to a confidence value (0.0 to 1.0).
+
+    Uses a sigmoid-like mapping:
+    - 2σ from baseline = 0.5 confidence
+    - 3σ = 0.75 confidence
+    - 4σ+ = 0.9+ confidence
+
+    The formula is: confidence = 1 - 1 / (1 + (|z| / 2)^2)
+    This gives:
+    - z=0: 0.0
+    - z=2: 0.5
+    - z=3: 0.69
+    - z=4: 0.80
+    - z=5: 0.86
+    - z=6: 0.90
+
+    Args:
+        z_score: The z-score value (can be positive or negative)
+
+    Returns:
+        Confidence value between 0.0 and 1.0
+    """
+    z = abs(z_score)
+    if z < 0.1:
+        return 0.0
+    # Sigmoid-like mapping centered at z=2 for 0.5 confidence
+    confidence = 1.0 - 1.0 / (1.0 + (z / 2.0) ** 2)
+    return min(1.0, confidence)
+
+
 @dataclass
 class RollingStats:
     """Rolling statistics for a single metric using a ring buffer."""
@@ -106,6 +138,17 @@ class RollingStats:
             "max": float(max(self._values)) if self._values else 0.0,
         }
 
+    def get_recent_variance(self, n: int = 5) -> float:
+        """
+        Get variance of the last n values.
+
+        Used for stability detection - low variance means stable.
+        """
+        if len(self._values) < n:
+            return float('inf')  # Not enough data
+        recent = list(self._values)[-n:]
+        return float(np.var(recent))
+
 
 class BaselineTracker:
     """
@@ -131,6 +174,12 @@ class BaselineTracker:
         window: Number of episodes for rolling statistics (default 50)
         warmup: Minimum episodes before adaptive layer activates (default 20)
         sensitivity: Number of std devs for "abnormal" threshold (default 2.0)
+
+    Auto-calibration:
+        Warmup ends automatically when baseline stats stabilize, rather than
+        waiting for a fixed number of episodes. This reduces false positives
+        from environments that stabilize quickly, while still protecting
+        against environments that need more time.
     """
 
     def __init__(
@@ -138,16 +187,37 @@ class BaselineTracker:
         window: int = 50,
         warmup: int = 20,
         sensitivity: float = 2.0,
+        # Auto-calibration settings
+        min_warmup_episodes: int = 10,
+        max_warmup_episodes: int = 50,
+        stability_threshold: float = 0.1,
+        stability_window: int = 5,
     ):
         """
         Args:
             window: Number of episodes for rolling window
-            warmup: Minimum episodes before adaptive layer activates
+            warmup: DEPRECATED - use min/max_warmup_episodes instead.
+                    Still accepted for backwards compatibility.
             sensitivity: Number of std devs for "abnormal" threshold
+            min_warmup_episodes: Minimum episodes before warmup can end (default 10)
+            max_warmup_episodes: Maximum warmup - activate anyway after this (default 50)
+            stability_threshold: Normalized variance threshold for stability (default 0.1)
+            stability_window: Number of recent episodes to check for stability (default 5)
         """
         self.window = window
-        self.warmup = warmup
+        self.warmup = warmup  # Keep for backwards compat
         self.sensitivity = sensitivity
+
+        # Auto-calibration settings
+        self.min_warmup_episodes = min_warmup_episodes
+        self.max_warmup_episodes = max_warmup_episodes
+        self.stability_threshold = stability_threshold
+        self.stability_window = stability_window
+
+        # Track when/why warmup ended
+        self._warmup_ended = False
+        self._warmup_ended_reason: Optional[str] = None
+        self._warmup_ended_episode: Optional[int] = None
 
         # Core metric trackers
         self._reward_stats = RollingStats(window_size=window)
@@ -173,13 +243,106 @@ class BaselineTracker:
 
     @property
     def is_active(self) -> bool:
-        """Check if adaptive layer is active (warmup complete)."""
-        return self._episodes_seen >= self.warmup
+        """
+        Check if adaptive layer is active (warmup complete).
+
+        Uses auto-calibration: warmup ends when either:
+        1. Max warmup episodes reached (safety valve)
+        2. Min warmup reached AND variance has stabilized
+        """
+        if self._warmup_ended:
+            return True
+
+        # Check if warmup should end
+        if self._check_warmup_complete():
+            self._warmup_ended = True
+            return True
+
+        return False
+
+    def _check_warmup_complete(self) -> bool:
+        """
+        Check if warmup should complete based on auto-calibration.
+
+        Returns True if:
+        - Max warmup episodes reached, OR
+        - Min warmup reached AND variance is stable
+        """
+        # Max warmup reached - activate anyway
+        if self._episodes_seen >= self.max_warmup_episodes:
+            self._warmup_ended_reason = f"max warmup ({self.max_warmup_episodes} episodes) reached"
+            self._warmup_ended_episode = self._episodes_seen
+            return True
+
+        # Haven't hit minimum yet
+        if self._episodes_seen < self.min_warmup_episodes:
+            return False
+
+        # Check if variance is stable
+        if self._variance_is_stable():
+            self._warmup_ended_reason = f"stabilized at episode {self._episodes_seen}"
+            self._warmup_ended_episode = self._episodes_seen
+            return True
+
+        return False
+
+    def _variance_is_stable(self) -> bool:
+        """
+        Check if the variance of key metrics has stabilized.
+
+        We check the normalized variance (coefficient of variation squared)
+        of the last N values. If it's below the threshold for key metrics,
+        we consider the baseline stable.
+        """
+        # Key metrics to check for stability
+        stats_to_check = [
+            ("reward", self._reward_stats),
+            ("length", self._length_stats),
+        ]
+
+        for name, stats in stats_to_check:
+            if stats.count < self.stability_window:
+                return False  # Not enough data
+
+            # Get recent variance
+            recent_var = stats.get_recent_variance(self.stability_window)
+
+            # Normalize by mean to get coefficient of variation squared
+            # This makes the threshold comparable across different scales
+            mean = stats.mean
+            if mean == 0:
+                # If mean is 0, use absolute variance check
+                if recent_var > self.stability_threshold:
+                    return False
+            else:
+                # Coefficient of variation squared
+                cv_squared = recent_var / (mean ** 2)
+                if cv_squared > self.stability_threshold:
+                    return False
+
+        return True
+
+    @property
+    def warmup_ended_reason(self) -> Optional[str]:
+        """Get the reason warmup ended (for debug output)."""
+        return self._warmup_ended_reason
+
+    @property
+    def warmup_ended_episode(self) -> Optional[int]:
+        """Get the episode when warmup ended."""
+        return self._warmup_ended_episode
 
     @property
     def warmup_progress(self) -> float:
-        """Get warmup progress as a fraction (0.0 to 1.0)."""
-        return min(1.0, self._episodes_seen / self.warmup)
+        """
+        Get warmup progress as a fraction (0.0 to 1.0).
+
+        With auto-calibration, progress is based on min_warmup_episodes
+        but can complete early if variance stabilizes.
+        """
+        if self._warmup_ended:
+            return 1.0
+        return min(1.0, self._episodes_seen / self.min_warmup_episodes)
 
     @property
     def episodes_seen(self) -> int:
@@ -333,6 +496,12 @@ class BaselineTracker:
             "sensitivity": self.sensitivity,
             "suppressed_count": self._suppressed_count,
             "warning_count": self._warning_count,
+            # Auto-calibration info
+            "min_warmup_episodes": self.min_warmup_episodes,
+            "max_warmup_episodes": self.max_warmup_episodes,
+            "stability_threshold": self.stability_threshold,
+            "warmup_ended_reason": self._warmup_ended_reason,
+            "warmup_ended_episode": self._warmup_ended_episode,
             "metrics": {},
         }
 
@@ -372,6 +541,10 @@ class BaselineTracker:
         self._episodes_seen = 0
         self._suppressed_count = 0
         self._warning_count = 0
+        # Reset auto-calibration state
+        self._warmup_ended = False
+        self._warmup_ended_reason = None
+        self._warmup_ended_episode = None
 
 
 def classify_alert(
