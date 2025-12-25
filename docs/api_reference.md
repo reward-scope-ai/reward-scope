@@ -90,9 +90,19 @@ env = RewardScopeWrapper(
     enable_component_imbalance=True,
     enable_reward_spiking=True,
     enable_boundary_exploitation=True,
+    # Two-layer detection (adaptive baselines)
+    adaptive_baseline=True,           # Enable two-layer detection
+    baseline_window=50,               # Rolling window size
+    baseline_warmup=20,               # Deprecated, use min/max_warmup
+    baseline_sensitivity=2.0,         # Std devs for "abnormal"
+    min_warmup_episodes=10,           # Min warmup before auto-calibration
+    max_warmup_episodes=50,           # Max warmup (safety valve)
+    stability_threshold=0.1,          # Variance threshold for stability
     # Dashboard
     start_dashboard=False,
     dashboard_port=8050,
+    # WandB
+    wandb_logging=False,
     # Other
     verbose=0,
 )
@@ -111,8 +121,12 @@ env = RewardScopeWrapper(
 
 The wrapper adds these keys to the `info` dict:
 - `reward_components`: Dict[str, float] - Decomposed components
-- `hacking_alerts`: List[HackingAlert] - Alerts from this step
+- `hacking_alerts`: List[dict] - Alerts from this step (includes `confidence` and `alert_severity`)
 - `hacking_score`: float - Current hacking score
+- `baseline_active`: bool - Whether adaptive baseline is active
+- `baseline_warmup_progress`: float - Warmup progress (0.0 to 1.0)
+- `suppressed_count`: int - Number of suppressed false positives
+- `warning_count`: int - Number of soft warnings
 
 ### RewardScopeCallback
 
@@ -135,9 +149,19 @@ callback = RewardScopeCallback(
     enable_boundary_exploitation=True,
     observation_bounds=None,
     action_bounds=None,
+    # Two-layer detection (adaptive baselines)
+    adaptive_baseline=True,           # Enable two-layer detection
+    baseline_window=50,               # Rolling window size
+    baseline_warmup=20,               # Deprecated, use min/max_warmup
+    baseline_sensitivity=2.0,         # Std devs for "abnormal"
+    min_warmup_episodes=10,           # Min warmup before auto-calibration
+    max_warmup_episodes=50,           # Max warmup (safety valve)
+    stability_threshold=0.1,          # Variance threshold for stability
     # Dashboard
     start_dashboard=False,
     dashboard_port=8050,
+    # WandB
+    wandb_logging=False,
     # Other
     verbose=1,
 )
@@ -200,6 +224,7 @@ episode_data = EpisodeData(
 
 ```python
 from reward_scope.core.detectors import HackingAlert, HackingType
+from reward_scope.core.baseline import AlertSeverity
 
 alert = HackingAlert(
     type=HackingType.ACTION_REPETITION,
@@ -209,8 +234,17 @@ alert = HackingAlert(
     description="Action repetition detected: 95% identical",
     evidence={"repetition_rate": 0.95, "action": 1},
     suggested_fix="Add action diversity bonus or randomize actions",
+    # Two-layer detection fields
+    alert_severity=AlertSeverity.ALERT,  # ALERT, WARNING, or SUPPRESSED
+    baseline_z_score=2.5,                # Z-score against baseline
+    confidence=0.61,                     # Confidence score (0.0-1.0)
 )
 ```
+
+**AlertSeverity Values:**
+- `AlertSeverity.ALERT` - Confirmed by both static and baseline
+- `AlertSeverity.WARNING` - Baseline abnormal but static didn't fire
+- `AlertSeverity.SUPPRESSED` - Static fired but baseline says normal (likely false positive)
 
 ## CLI Commands
 

@@ -38,6 +38,7 @@ RewardScope takes a detection-first approach. Monitor for exploitation patterns 
 
 - 🎯 **Reward Decomposition** - Track individual reward components separately
 - 🚨 **Hacking Detection** - 5 detectors for common exploitation patterns
+- 🧠 **Adaptive Baselines** - Learns "normal" patterns per training run to reduce false positives
 - 📊 **Live Dashboard** - Real-time visualization with FastAPI + Chart.js
 - 🔌 **Easy Integration** - Works with Gymnasium, Stable-Baselines3, and Isaac Lab (coming soon)
 - 💾 **Persistent Storage** - SQLite backend for post-training analysis

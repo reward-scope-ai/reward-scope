@@ -116,6 +116,63 @@ RewardScopeWrapper(
 
 **Fix:** Add boundary penalties, fix physics at boundaries, expand valid range.
 
+## Adaptive Baselines (Two-Layer Detection)
+
+Static thresholds can produce false positives, especially in the early training phases where behavior is naturally variable. Adaptive baselines add a second layer of detection that learns what's "normal" for your specific training run.
+
+### How It Works
+
+1. **Static detector fires + baseline abnormal** → **ALERT** (confirmed)
+2. **Static detector fires + baseline normal** → **SUPPRESSED** (likely false positive)
+3. **Static detector doesn't fire + baseline abnormal** → **WARNING** (unusual but not severe)
+4. **Static detector doesn't fire + baseline normal** → No alert
+
+### Parameters
+
+```python
+env = RewardScopeWrapper(
+    env,
+    adaptive_baseline=True,          # Enable two-layer detection (default)
+    baseline_window=50,              # Rolling window for statistics
+    baseline_warmup=20,              # Deprecated, use min/max_warmup
+    baseline_sensitivity=2.0,        # Std devs for "abnormal" threshold
+    min_warmup_episodes=10,          # Min episodes before baseline activates
+    max_warmup_episodes=50,          # Max warmup (safety valve)
+    stability_threshold=0.1,         # Variance threshold for auto-calibration
+)
+```
+
+### Confidence Scores
+
+Alerts include a confidence score (0.0 to 1.0) based on how far the metric deviates from baseline:
+
+- **2σ deviation** → 0.50 confidence
+- **3σ deviation** → 0.69 confidence
+- **4σ deviation** → 0.80 confidence
+
+Access confidence in alert output:
+
+```python
+for alert in alerts:
+    print(f"{alert.type.value}: confidence={alert.confidence:.2f}")
+```
+
+### Auto-Calibration
+
+By default, warmup ends automatically when baseline statistics stabilize (low variance in recent episodes) rather than waiting for a fixed number of episodes. This reduces false positives during stable environments while protecting against environments that need more warmup time.
+
+### Known Limitation
+
+If an agent gradually drifts into hacking over 100+ episodes, the baseline drifts with it. The static detectors are the backstop for this case.
+
+### Example Output
+
+```
+[RewardScope] Episode 5 started (baseline warmup: 80%)
+[RewardScope] Episode 6 complete: reward=23.00, length=23
+[RewardScope] WARNING (confidence=0.56): baseline_deviation: Unusual reward: 43.00 is 2.3σ from baseline
+```
+
 ## Hacking Score
 
 Each detector has a 0-1 severity score. The overall hacking score is:

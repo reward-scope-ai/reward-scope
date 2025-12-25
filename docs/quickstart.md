@@ -160,9 +160,11 @@ env = RewardScopeWrapper(
 ## Next Steps
 
 - [Reward Components Guide](reward_components.md) - Learn about reward decomposition
-- [Hacking Detection Guide](hacking_detection.md) - Understanding the detectors
+- [Hacking Detection Guide](hacking_detection.md) - Understanding the detectors and adaptive baselines
 - [API Reference](api_reference.md) - Detailed API documentation
 - Check out the [examples](../examples/) directory
+
+**Note:** RewardScope includes adaptive baselines by default to reduce false positives. The system learns "normal" patterns during warmup and modulates alerts accordingly. See [Hacking Detection Guide](hacking_detection.md#adaptive-baselines-two-layer-detection) for details.
 
 ## Troubleshooting
 
