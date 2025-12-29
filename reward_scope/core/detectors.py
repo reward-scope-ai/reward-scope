@@ -1393,7 +1393,8 @@ class HackingDetectorSuite:
         """Reset all detectors (but preserve baseline tracking)."""
         for detector in self.detectors:
             detector.reset()
-        self._custom_alerts.clear()
+        # Note: We intentionally do NOT reset _custom_alerts here because
+        # historical alerts should persist (same as detector.alerts).
         # Note: We intentionally do NOT reset the baseline_tracker or
         # baseline_collector here because baselines should persist across episodes
 
