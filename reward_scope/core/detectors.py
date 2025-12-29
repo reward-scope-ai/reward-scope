@@ -892,6 +892,7 @@ class HackingDetectorSuite:
     ):
         self.detectors: List[BaseDetector] = []
         self.custom_detectors: List[Callable[..., Optional[HackingAlert]]] = custom_detectors or []
+        self._custom_alerts: List[HackingAlert] = []
 
         # Process disable_detectors parameter
         disabled_set: set = set()
@@ -1053,6 +1054,7 @@ class HackingDetectorSuite:
                     alert = self._apply_custom_detector_baseline(alert)
                     if alert is not None:
                         self._fire_alert_callbacks(alert)
+                        self._custom_alerts.append(alert)
                         alerts.append(alert)
             except Exception:
                 # Silently ignore custom detector errors to avoid breaking training
@@ -1336,6 +1338,8 @@ class HackingDetectorSuite:
         alerts = []
         for detector in self.detectors:
             alerts.extend(detector.alerts)
+        # Include custom detector alerts
+        alerts.extend(self._custom_alerts)
         # Include baseline deviation alerts (legacy Phase 1)
         if hasattr(self, '_baseline_alerts'):
             alerts.extend(self._baseline_alerts)
@@ -1389,6 +1393,7 @@ class HackingDetectorSuite:
         """Reset all detectors (but preserve baseline tracking)."""
         for detector in self.detectors:
             detector.reset()
+        self._custom_alerts.clear()
         # Note: We intentionally do NOT reset the baseline_tracker or
         # baseline_collector here because baselines should persist across episodes
 
