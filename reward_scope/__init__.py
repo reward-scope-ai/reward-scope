@@ -2,7 +2,7 @@
 RewardScope: Real-time reward debugging for reinforcement learning.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.2"
 
 from reward_scope.core.collector import DataCollector, StepData, EpisodeData
 from reward_scope.core.decomposer import RewardDecomposer, RewardComponent, IsaacLabDecomposer
