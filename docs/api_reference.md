@@ -90,6 +90,9 @@ env = RewardScopeWrapper(
     enable_component_imbalance=True,
     enable_reward_spiking=True,
     enable_boundary_exploitation=True,
+    disable_detectors=None,           # List of detector names to disable
+    # Alert callbacks
+    on_alert=None,                    # Callback or list of callbacks for alerts
     # Two-layer detection (adaptive baselines)
     adaptive_baseline=True,           # Enable two-layer detection
     baseline_window=50,               # Rolling window size
@@ -98,13 +101,15 @@ env = RewardScopeWrapper(
     min_warmup_episodes=10,           # Min warmup before auto-calibration
     max_warmup_episodes=50,           # Max warmup (safety valve)
     stability_threshold=0.1,          # Variance threshold for stability
+    # Custom detectors
+    custom_detectors=None,            # List of custom detector functions
     # Dashboard
     start_dashboard=False,
     dashboard_port=8050,
     # WandB
     wandb_logging=False,
     # Other
-    verbose=0,
+    verbose=0,                        # 0=silent, 1=episode summaries, 2=alerts, 3=debug
 )
 ```
 
@@ -116,6 +121,9 @@ env = RewardScopeWrapper(
 - `get_hacking_score() -> float` - Get hacking score
 - `get_component_stats() -> Dict` - Get component statistics
 - `get_episode_history(n) -> List[EpisodeData]` - Get episode history
+- `export_alerts(path, format=None)` - Export alerts to JSON or CSV
+- `export_episode_history(path, format=None)` - Export episode history to JSON or CSV
+- `print_summary()` - Print formatted summary of the run
 
 **Info Dict Extensions:**
 
@@ -149,6 +157,9 @@ callback = RewardScopeCallback(
     enable_boundary_exploitation=True,
     observation_bounds=None,
     action_bounds=None,
+    disable_detectors=None,           # List of detector names to disable
+    # Alert callbacks
+    on_alert=None,                    # Callback or list of callbacks for alerts
     # Two-layer detection (adaptive baselines)
     adaptive_baseline=True,           # Enable two-layer detection
     baseline_window=50,               # Rolling window size
@@ -157,13 +168,15 @@ callback = RewardScopeCallback(
     min_warmup_episodes=10,           # Min warmup before auto-calibration
     max_warmup_episodes=50,           # Max warmup (safety valve)
     stability_threshold=0.1,          # Variance threshold for stability
+    # Custom detectors
+    custom_detectors=None,            # List of custom detector functions
     # Dashboard
     start_dashboard=False,
     dashboard_port=8050,
     # WandB
     wandb_logging=False,
     # Other
-    verbose=1,
+    verbose=1,                        # 0=silent, 1=episode summaries, 2=alerts, 3=debug
 )
 
 model.learn(total_timesteps=50000, callback=callback)
@@ -172,6 +185,9 @@ model.learn(total_timesteps=50000, callback=callback)
 **Methods:**
 - `get_alerts() -> List[HackingAlert]` - Get detected alerts
 - `get_hacking_score() -> float` - Get hacking score
+- `export_alerts(path, format=None)` - Export alerts to JSON or CSV
+- `export_episode_history(path, format=None)` - Export episode history to JSON or CSV
+- `print_summary()` - Print formatted summary of the run
 
 **Attributes:**
 - `collector`: DataCollector instance
@@ -288,6 +304,92 @@ When running the dashboard, these endpoints are available:
 - `GET /api/episode-history?n=50` - Episode statistics
 - `GET /api/alerts` - Hacking alerts
 - `WebSocket /ws/live` - Real-time updates (10Hz)
+
+## Callback Signatures
+
+### Alert Callback
+
+The `on_alert` parameter accepts a function or list of functions with this signature:
+
+```python
+def my_alert_handler(alert: HackingAlert) -> None:
+    """
+    Called when a hacking alert is detected.
+
+    Args:
+        alert: The HackingAlert object containing:
+            - type: HackingType enum
+            - severity: float (0.0-1.0)
+            - alert_severity: AlertSeverity (ALERT, WARNING, or SUPPRESSED)
+            - description: str
+            - evidence: dict
+            - suggested_fix: str
+            - confidence: Optional[float]
+            - baseline_z_score: Optional[float]
+
+    Note: Only called for ALERT and WARNING severity (not SUPPRESSED)
+    """
+    print(f"Alert: {alert.type.value} - {alert.description}")
+```
+
+**Usage:**
+
+```python
+def log_alert(alert):
+    with open("alerts.log", "a") as f:
+        f.write(f"{alert.type.value}: {alert.description}\n")
+
+env = RewardScopeWrapper(
+    env,
+    on_alert=log_alert  # Single callback
+)
+
+# Or multiple callbacks:
+env = RewardScopeWrapper(
+    env,
+    on_alert=[log_alert, send_to_slack, trigger_early_stop]
+)
+```
+
+### Custom Detector Function
+
+See [Hacking Detection Guide](hacking_detection.md#custom-detectors) for the full signature and examples.
+
+## Verbose Levels
+
+The `verbose` parameter controls output verbosity:
+
+- **0** - Silent (no output)
+- **1** - Episode summaries and final summary (default for callback)
+  - Episode completion messages
+  - Baseline warmup progress
+  - Final summary with alert counts
+- **2** - Step-level alerts as they fire
+  - All verbose=1 output
+  - Real-time alerts with severity and confidence
+  - Episode-level alerts
+- **3** - Debug output
+  - All verbose=2 output
+  - Alert evidence dictionaries
+  - Suggested fixes
+  - Baseline z-scores
+  - Component breakdowns
+
+**Example output at different levels:**
+
+```
+# verbose=1
+[RewardScope] Episode 5 complete: reward=23.00, length=23, hacking_score=0.120
+[RewardScope] Episode 10 started (baseline warmup: 50%)
+
+# verbose=2 (includes verbose=1 plus)
+[RewardScope] ALERT (confidence=0.81): action_repetition: 95% of actions identical
+
+# verbose=3 (includes verbose=2 plus)
+  Evidence: {'repetition_rate': 0.95, 'action': 1}
+  Fix: Add action diversity bonus or randomize actions
+  Baseline z-score: 3.42
+```
 
 ## Type Hints
 
