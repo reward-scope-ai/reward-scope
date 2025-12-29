@@ -5,7 +5,7 @@ Provides a wrapper that collects reward debugging data from Gymnasium
 environments.
 """
 
-from typing import Optional, Dict, Any, Callable, Tuple, List
+from typing import Optional, Dict, Any, Callable, Tuple, List, Union
 import time
 import numpy as np
 import gymnasium as gym
@@ -63,6 +63,10 @@ class RewardScopeWrapper(gym.Wrapper):
         enable_component_imbalance: bool = True,
         enable_reward_spiking: bool = True,
         enable_boundary_exploitation: bool = True,
+        # Disable detectors by name (takes precedence over enable_* flags)
+        disable_detectors: Optional[List[str]] = None,
+        # Alert callbacks
+        on_alert: Optional[Union[Callable[[HackingAlert], None], List[Callable[[HackingAlert], None]]]] = None,
         # Two-layer detection settings (Phase 2)
         adaptive_baseline: bool = True,
         baseline_window: int = 50,
@@ -94,6 +98,12 @@ class RewardScopeWrapper(gym.Wrapper):
             auto_extract_prefix: Prefix for auto-extracting reward components from info dict
             component_fns: Dict of component_name -> function(obs, action, info) -> float
             enable_*: Enable/disable specific detectors
+            disable_detectors: List of detector names to disable. Takes precedence over
+                enable_* flags. Valid names: "action_repetition", "state_cycling",
+                "component_imbalance", "reward_spiking", "boundary_exploitation"
+            on_alert: Callback or list of callbacks to invoke when an alert fires.
+                Signature: def callback(alert: HackingAlert) -> None
+                Called immediately for ALERT and WARNING severity (not for SUPPRESSED).
             adaptive_baseline: Enable two-layer detection (on by default). When enabled,
                 static detectors are modulated by a rolling baseline that learns what's
                 "normal" for this training run. This reduces false positives.
@@ -176,6 +186,10 @@ class RewardScopeWrapper(gym.Wrapper):
             enable_boundary_exploitation=enable_boundary_exploitation,
             observation_bounds=observation_bounds,
             action_bounds=action_bounds,
+            # Disable detectors by name
+            disable_detectors=disable_detectors,
+            # Alert callbacks
+            on_alert=on_alert,
             # Two-layer detection (Phase 2)
             adaptive_baseline=adaptive_baseline,
             baseline_window=baseline_window,

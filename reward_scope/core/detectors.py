@@ -828,6 +828,17 @@ class HackingDetectorSuite:
             baseline_sensitivity=2.0, # Std devs for "abnormal" threshold
         )
 
+    Disable specific detectors by name:
+        suite = HackingDetectorSuite(
+            disable_detectors=["state_cycling", "boundary_exploitation"]
+        )
+
+    Alert callbacks:
+        def my_callback(alert):
+            print(f"Alert: {alert.type.value}")
+
+        suite = HackingDetectorSuite(on_alert=my_callback)
+
     Two-layer detection logic:
     1. Static detector fires + baseline abnormal → ALERT (confirmed)
     2. Static detector fires + baseline normal → SUPPRESSED (likely false positive)
@@ -841,6 +852,15 @@ class HackingDetectorSuite:
         )
     """
 
+    # Valid detector names for disable_detectors parameter
+    VALID_DETECTOR_NAMES = {
+        "action_repetition",
+        "state_cycling",
+        "component_imbalance",
+        "reward_spiking",
+        "boundary_exploitation",
+    }
+
     def __init__(
         self,
         enable_state_cycling: bool = True,
@@ -850,6 +870,10 @@ class HackingDetectorSuite:
         enable_boundary_exploitation: bool = True,
         observation_bounds: Optional[Tuple[np.ndarray, np.ndarray]] = None,
         action_bounds: Optional[Tuple[np.ndarray, np.ndarray]] = None,
+        # Disable detectors by name (takes precedence over enable_* flags)
+        disable_detectors: Optional[List[str]] = None,
+        # Alert callbacks
+        on_alert: Optional[Any] = None,  # Callable or List[Callable]
         # Two-layer detection settings (Phase 2)
         adaptive_baseline: bool = True,
         baseline_window: int = 50,
@@ -869,15 +893,41 @@ class HackingDetectorSuite:
         self.detectors: List[BaseDetector] = []
         self.custom_detectors: List[Callable[..., Optional[HackingAlert]]] = custom_detectors or []
 
-        if enable_state_cycling:
+        # Process disable_detectors parameter
+        disabled_set: set = set()
+        if disable_detectors:
+            for name in disable_detectors:
+                if name not in self.VALID_DETECTOR_NAMES:
+                    raise ValueError(
+                        f"Invalid detector name: '{name}'. "
+                        f"Valid names are: {sorted(self.VALID_DETECTOR_NAMES)}"
+                    )
+                disabled_set.add(name)
+
+        # Process on_alert callbacks
+        self._alert_callbacks: List[Callable[[HackingAlert], None]] = []
+        if on_alert is not None:
+            if callable(on_alert):
+                self._alert_callbacks.append(on_alert)
+            elif isinstance(on_alert, (list, tuple)):
+                for cb in on_alert:
+                    if callable(cb):
+                        self._alert_callbacks.append(cb)
+                    else:
+                        raise ValueError(f"on_alert list contains non-callable: {type(cb)}")
+            else:
+                raise ValueError(f"on_alert must be callable or list of callables, got: {type(on_alert)}")
+
+        # Create detectors (disable_detectors takes precedence over enable_* flags)
+        if enable_state_cycling and "state_cycling" not in disabled_set:
             self.detectors.append(StateCyclingDetector())
-        if enable_action_repetition:
+        if enable_action_repetition and "action_repetition" not in disabled_set:
             self.detectors.append(ActionRepetitionDetector())
-        if enable_component_imbalance:
+        if enable_component_imbalance and "component_imbalance" not in disabled_set:
             self.detectors.append(ComponentImbalanceDetector())
-        if enable_reward_spiking:
+        if enable_reward_spiking and "reward_spiking" not in disabled_set:
             self.detectors.append(RewardSpikingDetector())
-        if enable_boundary_exploitation:
+        if enable_boundary_exploitation and "boundary_exploitation" not in disabled_set:
             self.detectors.append(BoundaryExploitationDetector(
                 observation_bounds=observation_bounds,
                 action_bounds=action_bounds,
@@ -917,6 +967,23 @@ class HackingDetectorSuite:
         # Storage for suppressed/warning alerts
         self._suppressed_alerts: List[HackingAlert] = []
         self._warning_alerts: List[HackingAlert] = []
+
+    def _fire_alert_callbacks(self, alert: HackingAlert) -> None:
+        """
+        Fire all registered alert callbacks for a non-suppressed alert.
+
+        Callbacks are called immediately when an alert fires, but only for
+        ALERT and WARNING severity (not for SUPPRESSED).
+        """
+        if alert.alert_severity == AlertSeverity.SUPPRESSED:
+            return  # Don't call callbacks for suppressed alerts
+
+        for callback in self._alert_callbacks:
+            try:
+                callback(alert)
+            except Exception:
+                # Silently ignore callback errors to avoid breaking detection
+                pass
 
     def update(
         self,
@@ -971,6 +1038,7 @@ class HackingDetectorSuite:
                 baseline_tracker=self.baseline_tracker,
             )
             if alert:
+                self._fire_alert_callbacks(alert)
                 alerts.append(alert)
 
         # Run custom detectors
@@ -984,6 +1052,7 @@ class HackingDetectorSuite:
                     # Apply two-layer logic to custom detector alerts
                     alert = self._apply_custom_detector_baseline(alert)
                     if alert is not None:
+                        self._fire_alert_callbacks(alert)
                         alerts.append(alert)
             except Exception:
                 # Silently ignore custom detector errors to avoid breaking training
@@ -1130,18 +1199,22 @@ class HackingDetectorSuite:
                     alert.baseline_z_score = z_score
 
                     if severity == AlertSeverity.ALERT:
+                        self._fire_alert_callbacks(alert)
                         alerts.append(alert)
                     elif severity == AlertSeverity.SUPPRESSED:
                         self._suppressed_alerts.append(alert)
                         self.baseline_tracker.record_suppressed()
                 else:
                     # Can't determine metric, treat as regular alert
+                    self._fire_alert_callbacks(alert)
                     alerts.append(alert)
 
             # Check for baseline-only warnings (abnormal but no static alert)
             self._check_baseline_warnings(current_episode, alerts)
         else:
             # Baseline not active yet, pass through static alerts
+            for alert in static_alerts:
+                self._fire_alert_callbacks(alert)
             alerts.extend(static_alerts)
 
         # Handle legacy adaptive baseline episode end (Phase 1)
@@ -1170,6 +1243,7 @@ class HackingDetectorSuite:
                         },
                         suggested_fix="Check if training dynamics have changed significantly from baseline.",
                     )
+                    self._fire_alert_callbacks(alert)
                     alerts.append(alert)
                     if not hasattr(self, '_baseline_alerts'):
                         self._baseline_alerts: List[HackingAlert] = []
@@ -1247,6 +1321,7 @@ class HackingDetectorSuite:
                         baseline_z_score=z_score,
                         confidence=confidence,
                     )
+                    self._fire_alert_callbacks(warning)
                     alerts.append(warning)
                     self._warning_alerts.append(warning)
                     self.baseline_tracker.record_warning()
