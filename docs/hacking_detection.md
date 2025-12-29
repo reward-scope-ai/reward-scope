@@ -234,6 +234,189 @@ action_detector = detector_suite.detectors[0]
 action_detector.repetition_threshold = 0.95  # More strict
 ```
 
+## Custom Detectors
+
+You can register custom detection functions to catch domain-specific hacking patterns.
+
+### Detector Signature
+
+Each custom detector is a function with the following signature:
+
+```python
+from typing import Optional
+from reward_scope.core.detectors import HackingAlert, HackingType
+
+def my_detector(
+    step: int,
+    episode: int,
+    obs,
+    action,
+    reward: float,
+    components: dict,
+    info: dict
+) -> Optional[HackingAlert]:
+    """
+    Custom detector function.
+
+    Args:
+        step: Current step number
+        episode: Current episode number
+        obs: Current observation
+        action: Action taken
+        reward: Reward received
+        components: Dict of reward components
+        info: Environment info dict
+
+    Returns:
+        HackingAlert if hacking detected, None otherwise
+    """
+    # Your detection logic here
+    if some_hacking_condition:
+        return HackingAlert(
+            type=HackingType.CUSTOM,
+            severity=0.8,  # 0.0 to 1.0
+            step=step,
+            episode=episode,
+            description="Description of the issue",
+            evidence={"key": "value"},
+            suggested_fix="How to fix this issue",
+        )
+    return None
+```
+
+### Example: Negative Reward Detector
+
+Detect when an agent consistently receives negative rewards:
+
+```python
+from reward_scope.core.detectors import HackingAlert, HackingType
+
+# Track state across calls (use a class for more complex state)
+negative_reward_count = 0
+total_steps = 0
+
+def negative_reward_detector(step, episode, obs, action, reward, components, info):
+    global negative_reward_count, total_steps
+
+    total_steps += 1
+    if reward < 0:
+        negative_reward_count += 1
+
+    # Check after every 100 steps
+    if total_steps >= 100 and total_steps % 100 == 0:
+        negative_rate = negative_reward_count / total_steps
+        if negative_rate > 0.8:  # 80% negative rewards
+            return HackingAlert(
+                type=HackingType.CUSTOM,
+                severity=negative_rate,
+                step=step,
+                episode=episode,
+                description=f"Agent receiving {negative_rate:.1%} negative rewards",
+                evidence={
+                    "negative_rate": negative_rate,
+                    "total_steps": total_steps,
+                },
+                suggested_fix="Check reward function or agent exploration",
+            )
+    return None
+```
+
+### Example: Velocity Threshold Detector
+
+Detect when a robot moves too fast (domain-specific safety check):
+
+```python
+import numpy as np
+from reward_scope.core.detectors import HackingAlert, HackingType
+
+MAX_SAFE_VELOCITY = 5.0
+
+def velocity_detector(step, episode, obs, action, reward, components, info):
+    # Assumes velocity is stored in info dict
+    velocity = info.get("velocity", 0)
+    if isinstance(velocity, (list, np.ndarray)):
+        velocity = np.linalg.norm(velocity)
+
+    if velocity > MAX_SAFE_VELOCITY:
+        severity = min(1.0, velocity / (2 * MAX_SAFE_VELOCITY))
+        return HackingAlert(
+            type=HackingType.CUSTOM,
+            severity=severity,
+            step=step,
+            episode=episode,
+            description=f"Velocity {velocity:.2f} exceeds safe limit {MAX_SAFE_VELOCITY}",
+            evidence={
+                "velocity": velocity,
+                "max_safe": MAX_SAFE_VELOCITY,
+            },
+            suggested_fix="Add velocity penalty or clipping to reward function",
+        )
+    return None
+```
+
+### Registering Custom Detectors
+
+Pass a list of detector functions to `RewardScopeWrapper` or `RewardScopeCallback`:
+
+```python
+from reward_scope.integrations import RewardScopeWrapper
+
+env = RewardScopeWrapper(
+    env,
+    run_name="custom_detection",
+    custom_detectors=[
+        negative_reward_detector,
+        velocity_detector,
+    ],
+)
+```
+
+Or with Stable-Baselines3:
+
+```python
+from reward_scope.integrations import RewardScopeCallback
+
+callback = RewardScopeCallback(
+    run_name="custom_detection",
+    custom_detectors=[
+        negative_reward_detector,
+        velocity_detector,
+    ],
+)
+```
+
+### Two-Layer Detection for Custom Detectors
+
+Custom detectors participate in the two-layer detection system. The baseline tracker uses the alert's severity value as the metric for comparison. If the severity is within normal ranges for your training run, the alert may be suppressed as a false positive.
+
+To ensure your custom alerts are always shown (bypass baseline suppression), set a high severity (close to 1.0) for critical issues.
+
+### Best Practices for Custom Detectors
+
+1. **Keep it simple**: Each detector should check one specific condition
+2. **Use appropriate severity**: 0.3-0.5 for warnings, 0.7-1.0 for critical issues
+3. **Include evidence**: Add relevant data to the `evidence` dict for debugging
+4. **Provide actionable fixes**: The `suggested_fix` should be specific and helpful
+5. **Handle errors gracefully**: Return `None` if detection fails (don't raise exceptions)
+6. **Use stateful classes**: For complex state tracking, use a class with `__call__`:
+
+```python
+class StatefulDetector:
+    def __init__(self, threshold: float = 0.9):
+        self.threshold = threshold
+        self.history = []
+
+    def __call__(self, step, episode, obs, action, reward, components, info):
+        self.history.append(reward)
+        if len(self.history) > 100:
+            avg = sum(self.history[-100:]) / 100
+            if avg < self.threshold:
+                return HackingAlert(...)
+        return None
+
+# Use as: custom_detectors=[StatefulDetector(threshold=0.5)]
+```
+
 ## False Positives
 
 **Action Repetition:**

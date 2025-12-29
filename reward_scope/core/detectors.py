@@ -10,7 +10,7 @@ Implements detection algorithms for common reward hacking patterns:
 6. Component Imbalance: One component dominates others
 """
 
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 import numpy as np
@@ -30,6 +30,7 @@ class HackingType(Enum):
     REWARD_SPIKING = "reward_spiking"
     COMPONENT_IMBALANCE = "component_imbalance"
     BASELINE_DEVIATION = "baseline_deviation"
+    CUSTOM = "custom"
 
 
 @dataclass
@@ -862,8 +863,11 @@ class HackingDetectorSuite:
         use_adaptive_baselines: bool = False,
         calibration_episodes: int = 20,
         baseline_sigma_threshold: float = 3.0,
+        # Custom detectors
+        custom_detectors: Optional[List[Callable[..., Optional[HackingAlert]]]] = None,
     ):
         self.detectors: List[BaseDetector] = []
+        self.custom_detectors: List[Callable[..., Optional[HackingAlert]]] = custom_detectors or []
 
         if enable_state_cycling:
             self.detectors.append(StateCyclingDetector())
@@ -969,7 +973,53 @@ class HackingDetectorSuite:
             if alert:
                 alerts.append(alert)
 
+        # Run custom detectors
+        for custom_detector in self.custom_detectors:
+            try:
+                alert = custom_detector(
+                    step, episode, observation, action,
+                    reward, reward_components, info
+                )
+                if alert is not None:
+                    # Apply two-layer logic to custom detector alerts
+                    alert = self._apply_custom_detector_baseline(alert)
+                    if alert is not None:
+                        alerts.append(alert)
+            except Exception:
+                # Silently ignore custom detector errors to avoid breaking training
+                pass
+
         return alerts
+
+    def _apply_custom_detector_baseline(
+        self,
+        alert: HackingAlert,
+    ) -> Optional[HackingAlert]:
+        """
+        Apply two-layer baseline logic to a custom detector alert.
+
+        Uses the alert's severity as the metric value for baseline comparison.
+        """
+        if self.baseline_tracker is None or not self.baseline_tracker.is_active:
+            return alert
+
+        # Use severity as the metric for baseline comparison
+        metric_value = alert.severity
+        baseline_abnormal = self.baseline_tracker.is_abnormal("custom_severity", metric_value)
+        z_score = self.baseline_tracker.get_z_score("custom_severity", metric_value)
+        severity = classify_alert(True, baseline_abnormal)
+
+        # Update alert with two-layer info
+        alert.alert_severity = severity
+        alert.baseline_z_score = z_score
+        alert.confidence = zscore_to_confidence(z_score)
+
+        if severity == AlertSeverity.SUPPRESSED:
+            self.baseline_tracker.record_suppressed()
+            self._suppressed_alerts.append(alert)
+            return None
+
+        return alert
 
     def _hash_action(self, action: Any) -> str:
         """Convert action to a hashable string for tracking."""

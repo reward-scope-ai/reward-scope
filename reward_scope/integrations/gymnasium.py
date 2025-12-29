@@ -5,14 +5,14 @@ Provides a wrapper that collects reward debugging data from Gymnasium
 environments.
 """
 
-from typing import Optional, Dict, Any, Callable, Tuple
+from typing import Optional, Dict, Any, Callable, Tuple, List
 import time
 import numpy as np
 import gymnasium as gym
 
 from ..core.collector import DataCollector, StepData
 from ..core.decomposer import RewardDecomposer
-from ..core.detectors import HackingDetectorSuite, HackingAlert, AlertSeverity
+from ..core.detectors import HackingDetectorSuite, HackingAlert, AlertSeverity, HackingType
 
 
 class RewardScopeWrapper(gym.Wrapper):
@@ -76,6 +76,8 @@ class RewardScopeWrapper(gym.Wrapper):
         use_adaptive_baselines: bool = False,
         calibration_episodes: int = 20,
         baseline_sigma_threshold: float = 3.0,
+        # Custom detectors
+        custom_detectors: Optional[List[Callable[..., Optional[HackingAlert]]]] = None,
         # Dashboard settings
         start_dashboard: bool = False,
         dashboard_port: int = 8050,
@@ -104,6 +106,8 @@ class RewardScopeWrapper(gym.Wrapper):
             use_adaptive_baselines: Legacy Phase 1 adaptive baselines (experimental)
             calibration_episodes: Legacy calibration episodes (default 20)
             baseline_sigma_threshold: Legacy deviation threshold (default 3.0)
+            custom_detectors: List of custom detector functions. Each function should have
+                signature: (step, episode, obs, action, reward, components, info) -> Optional[HackingAlert]
             start_dashboard: Whether to auto-start the web dashboard
             dashboard_port: Port for the dashboard server
             wandb_logging: Whether to log metrics to WandB (requires wandb.init() to be called first)
@@ -181,6 +185,8 @@ class RewardScopeWrapper(gym.Wrapper):
             use_adaptive_baselines=use_adaptive_baselines,
             calibration_episodes=calibration_episodes,
             baseline_sigma_threshold=baseline_sigma_threshold,
+            # Custom detectors
+            custom_detectors=custom_detectors,
         )
 
         # Track baseline settings for logging
