@@ -13,6 +13,7 @@ import gymnasium as gym
 from ..core.collector import DataCollector, StepData
 from ..core.decomposer import RewardDecomposer
 from ..core.detectors import HackingDetectorSuite, HackingAlert, AlertSeverity, HackingType
+from ..utils.export import export_alerts_to_file, export_episodes_to_file
 
 
 class RewardScopeWrapper(gym.Wrapper):
@@ -662,3 +663,33 @@ class RewardScopeWrapper(gym.Wrapper):
     def is_calibrated(self) -> bool:
         """Check if adaptive baseline calibration is complete."""
         return self.detector_suite.is_calibrated
+
+    def export_alerts(self, path: str, format: Optional[str] = None) -> None:
+        """
+        Export alerts to JSON or CSV.
+
+        Args:
+            path: Output file path
+            format: Export format ("json" or "csv"). If None, auto-detect from file extension.
+
+        Example:
+            env.export_alerts("alerts.json")  # Auto-detect JSON format
+            env.export_alerts("alerts.csv", format="csv")  # Explicit CSV format
+        """
+        alerts = self.detector_suite.get_all_alerts()
+        export_alerts_to_file(alerts, path, format)
+
+    def export_episode_history(self, path: str, format: Optional[str] = None) -> None:
+        """
+        Export episode history to JSON or CSV.
+
+        Args:
+            path: Output file path
+            format: Export format ("json" or "csv"). If None, auto-detect from file extension.
+
+        Example:
+            env.export_episode_history("episodes.json")  # Auto-detect JSON format
+            env.export_episode_history("episodes.csv", format="csv")  # Explicit CSV format
+        """
+        episodes = self.collector.get_episode_history(n=10000)  # Get all episodes
+        export_episodes_to_file(episodes, path, format)
