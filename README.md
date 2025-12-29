@@ -43,6 +43,9 @@ RewardScope takes a detection-first approach. Monitor for exploitation patterns 
 - 🔌 **Easy Integration** - Works with Gymnasium, Stable-Baselines3, and Isaac Lab (coming soon)
 - 💾 **Persistent Storage** - SQLite backend for post-training analysis
 - 📈 **WandB Integration** - Optional logging to Weights & Biases
+- 🔧 **Custom Detectors** - Add domain-specific hacking patterns
+- 🎛️ **Flexible Configuration** - Disable detectors, set callbacks, control verbosity
+- 📤 **Export Functions** - Export alerts and episode history to JSON/CSV
 - 🎮 **CLI Tools** - Dashboard, reports, and run management
 
 ## Quick Start

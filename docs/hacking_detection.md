@@ -206,6 +206,10 @@ for alert in alerts:
 
 ### Disable Specific Detectors
 
+You can disable detectors using either the `enable_*` flags or the `disable_detectors` parameter:
+
+**Option 1: Using enable flags**
+
 ```python
 RewardScopeWrapper(
     env,
@@ -216,6 +220,24 @@ RewardScopeWrapper(
     enable_boundary_exploitation=True,
 )
 ```
+
+**Option 2: Using disable_detectors (recommended)**
+
+```python
+RewardScopeWrapper(
+    env,
+    disable_detectors=["state_cycling", "boundary_exploitation"],
+)
+```
+
+Valid detector names:
+- `"action_repetition"`
+- `"state_cycling"`
+- `"component_imbalance"`
+- `"reward_spiking"`
+- `"boundary_exploitation"`
+
+**Note:** The `disable_detectors` parameter takes precedence over `enable_*` flags.
 
 ### Custom Thresholds
 
@@ -233,6 +255,89 @@ detector_suite = HackingDetectorSuite(
 action_detector = detector_suite.detectors[0]
 action_detector.repetition_threshold = 0.95  # More strict
 ```
+
+## Alert Callbacks
+
+You can register callbacks to be notified immediately when alerts are detected. This is useful for:
+- Logging alerts to external systems
+- Sending notifications (email, Slack, etc.)
+- Triggering early stopping
+- Custom alert handling logic
+
+### Basic Usage
+
+```python
+def my_alert_handler(alert):
+    print(f"🚨 Alert detected: {alert.type.value}")
+    print(f"   Severity: {alert.severity:.2f}")
+    print(f"   Description: {alert.description}")
+
+env = RewardScopeWrapper(
+    env,
+    on_alert=my_alert_handler,
+)
+```
+
+### Multiple Callbacks
+
+You can register multiple callbacks - they'll all be called in order:
+
+```python
+def log_to_file(alert):
+    with open("alerts.log", "a") as f:
+        f.write(f"{alert.type.value}: {alert.description}\n")
+
+def send_notification(alert):
+    if alert.severity > 0.7:  # High severity only
+        send_slack_message(f"High severity alert: {alert.description}")
+
+env = RewardScopeWrapper(
+    env,
+    on_alert=[log_to_file, send_notification],
+)
+```
+
+### Alert Object Properties
+
+The callback receives a `HackingAlert` object with:
+
+- `type` - HackingType enum (e.g., `HackingType.ACTION_REPETITION`)
+- `severity` - Float 0.0-1.0 (detector's severity score)
+- `alert_severity` - AlertSeverity enum (`ALERT`, `WARNING`, or `SUPPRESSED`)
+- `description` - Human-readable description
+- `evidence` - Dict with detection details
+- `suggested_fix` - Recommendation for fixing the issue
+- `confidence` - Optional[float] - Confidence score from baseline (0.0-1.0)
+- `baseline_z_score` - Optional[float] - Z-score against baseline
+- `step` - Step number when detected
+- `episode` - Episode number when detected
+
+### Early Stopping Example
+
+```python
+def early_stop_on_hacking(alert):
+    if alert.severity > 0.8 and alert.alert_severity == AlertSeverity.ALERT:
+        print(f"Critical hacking detected: {alert.type.value}")
+        print("Stopping training...")
+        raise KeyboardInterrupt  # Stop training loop
+
+callback = RewardScopeCallback(
+    run_name="my_experiment",
+    on_alert=early_stop_on_hacking,
+)
+
+try:
+    model.learn(total_timesteps=100000, callback=callback)
+except KeyboardInterrupt:
+    print("Training stopped due to hacking detection")
+```
+
+### Notes
+
+- Callbacks are only invoked for `ALERT` and `WARNING` severity (not `SUPPRESSED`)
+- Callbacks are called immediately when the alert is detected
+- If a callback raises an exception, it will propagate up and may stop training
+- For SB3, callbacks run in the `_on_step()` method
 
 ## Custom Detectors
 
