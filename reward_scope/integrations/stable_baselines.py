@@ -106,7 +106,11 @@ class RewardScopeCallback(BaseCallback):
             start_dashboard: Whether to auto-start the web dashboard
             dashboard_port: Port for the dashboard server
             wandb_logging: Whether to log metrics to WandB (requires wandb.init() to be called first)
-            verbose: Verbosity level (0=silent, 1=info, 2=debug)
+            verbose: Verbosity level:
+                0 = silent (no output)
+                1 = episode summaries + final summary
+                2 = step-level alerts as they fire
+                3 = debug output (baseline stats, detector scores)
         """
         super().__init__(verbose=verbose)
 
@@ -302,13 +306,13 @@ class RewardScopeCallback(BaseCallback):
                 info=info,
             )
 
-            # Print alerts if any (with alert severity and confidence)
-            if alerts and self.verbose >= 1:
+            # Print step-level alerts if verbose >= 2 (alerts as they fire)
+            if alerts and self.verbose >= 2:
                 for alert in alerts:
                     severity_label = alert.alert_severity.value.upper()
                     confidence_str = f" (confidence={alert.confidence:.2f})" if alert.confidence is not None else ""
                     print(f"[RewardScope] {severity_label}{confidence_str}: {alert.type.value}: {alert.description}")
-                    if self.verbose >= 2:
+                    if self.verbose >= 3:
                         print(f"  Evidence: {alert.evidence}")
                         print(f"  Fix: {alert.suggested_fix}")
                         if alert.baseline_z_score is not None:
@@ -324,11 +328,15 @@ class RewardScopeCallback(BaseCallback):
                     "episode": self.episode_count,
                 })
 
-                if episode_alerts and self.verbose >= 1:
+                if episode_alerts and self.verbose >= 2:
                     for alert in episode_alerts:
                         severity_label = alert.alert_severity.value.upper()
                         confidence_str = f" (confidence={alert.confidence:.2f})" if alert.confidence is not None else ""
                         print(f"[RewardScope] {severity_label}{confidence_str} Episode {self.episode_count}: {alert.type.value}: {alert.description}")
+                        if self.verbose >= 3:
+                            print(f"  Evidence: {alert.evidence}")
+                            if alert.baseline_z_score is not None:
+                                print(f"  Baseline z-score: {alert.baseline_z_score:.2f}")
 
                 # Get hacking score and flags from detector suite
                 hacking_score = self.detector_suite.get_hacking_score()
@@ -441,40 +449,78 @@ class RewardScopeCallback(BaseCallback):
             if self.verbose >= 1:
                 print(f"[RewardScope] Warning: Failed to log to wandb: {e}")
 
+    def print_summary(self) -> None:
+        """
+        Print a formatted summary of the RewardScope run.
+
+        Output format:
+        ════════════════════════════════════════
+        RewardScope Summary
+        ════════════════════════════════════════
+        Episodes:           500
+        Total steps:        50000
+        Total alerts:       47
+          - ALERT:          12
+          - WARNING:        31
+          - SUPPRESSED:     4
+        Hacking score:      0.23
+        Most common:        action_repetition (31x)
+        Baseline status:    active (window: 50 eps)
+        ════════════════════════════════════════
+        """
+        border = "═" * 40
+        print(border)
+        print("RewardScope Summary")
+        print(border)
+
+        print(f"{'Episodes:':<20}{self.episode_count}")
+        print(f"{'Total steps:':<20}{self.step_count}")
+
+        # Get all alerts including suppressed for counting
+        all_alerts = self.detector_suite.get_all_alerts(include_suppressed=True)
+        suppressed_count = self.detector_suite.get_suppressed_count()
+        non_suppressed = [a for a in all_alerts if a.alert_severity != AlertSeverity.SUPPRESSED]
+
+        total_alerts = len(non_suppressed)
+        alert_count = sum(1 for a in non_suppressed if a.alert_severity == AlertSeverity.ALERT)
+        warning_count = sum(1 for a in non_suppressed if a.alert_severity == AlertSeverity.WARNING)
+
+        print(f"{'Total alerts:':<20}{total_alerts}")
+        if total_alerts > 0 or suppressed_count > 0:
+            print(f"  {'- ALERT:':<18}{alert_count}")
+            print(f"  {'- WARNING:':<18}{warning_count}")
+            print(f"  {'- SUPPRESSED:':<18}{suppressed_count}")
+
+        hacking_score = self.detector_suite.get_hacking_score()
+        print(f"{'Hacking score:':<20}{hacking_score:.2f}")
+
+        # Find most common alert type
+        if non_suppressed:
+            alert_types = {}
+            for alert in non_suppressed:
+                alert_type = alert.type.value
+                alert_types[alert_type] = alert_types.get(alert_type, 0) + 1
+            most_common_type, most_common_count = max(alert_types.items(), key=lambda x: x[1])
+            print(f"{'Most common:':<20}{most_common_type} ({most_common_count}x)")
+
+        # Baseline status
+        if self.adaptive_baseline:
+            if self.detector_suite.baseline_is_active:
+                window = self.detector_suite.baseline_tracker.window if self.detector_suite.baseline_tracker else 50
+                print(f"{'Baseline status:':<20}active (window: {window} eps)")
+            else:
+                progress = self.detector_suite.baseline_warmup_progress
+                print(f"{'Baseline status:':<20}warming up ({progress:.0%})")
+        else:
+            print(f"{'Baseline status:':<20}disabled")
+
+        print(border)
+
     def _on_training_end(self) -> None:
         """Called when training ends."""
+        # Print summary if verbose >= 1
         if self.verbose >= 1:
-            print(f"[RewardScope] Training complete!")
-            print(f"  Total steps: {self.step_count}")
-            print(f"  Total episodes: {self.episode_count}")
-            print(f"  Hacking score: {self.detector_suite.get_hacking_score():.3f}")
-
-            all_alerts = self.detector_suite.get_all_alerts()
-            if all_alerts:
-                print(f"  Total alerts: {len(all_alerts)}")
-
-                # Break down by alert severity (ALERT vs WARNING)
-                alert_count = sum(1 for a in all_alerts if a.alert_severity == AlertSeverity.ALERT)
-                warning_count = sum(1 for a in all_alerts if a.alert_severity == AlertSeverity.WARNING)
-                if alert_count > 0 or warning_count > 0:
-                    print(f"    - Confirmed alerts: {alert_count}")
-                    print(f"    - Soft warnings: {warning_count}")
-
-                # Break down by type
-                alert_types = {}
-                for alert in all_alerts:
-                    alert_type = alert.type.value
-                    alert_types[alert_type] = alert_types.get(alert_type, 0) + 1
-
-                print("  Alert type breakdown:")
-                for alert_type, count in alert_types.items():
-                    print(f"    - {alert_type}: {count}")
-
-            # Show suppressed count if two-layer detection was active
-            if self.adaptive_baseline:
-                suppressed = self.detector_suite.get_suppressed_count()
-                if suppressed > 0:
-                    print(f"  Suppressed false positives: {suppressed}")
+            self.print_summary()
 
         # Stop dashboard
         self._stop_dashboard()
